@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-set -e
-echo "▶ Instalando Playwright + Chromium"
-pip install --no-cache-dir --upgrade pip
-pip install --no-cache-dir -r requirements.txt
-python -m playwright install --with-deps chromium
-echo "✔ Playwright pronto"
+# instala dependências Python do projeto…
+pip install -r requirements.txt
+
+# baixa **só** o Chromium que o Playwright usa
+python -m playwright install chromium
