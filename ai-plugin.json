@@ -2,8 +2,8 @@
   "schema_version": "v1",
   "name_for_human": "Brilho do Sol Nascente",
   "name_for_model": "brilho_nascente",
-  "description_for_human": "Gera narra\u00e7\u00f5es (ElevenLabs) e devolve transcri\u00e7\u00e3o com minutagem (Whisper\u20111).",
-  "description_for_model": "Endpoints para gerar \u00e1udio TTS e transcrever com minutagem.",
+  "description_for_human": "Gera narra\u00e7\u00f5es com ElevenLabs e transcreve com Whisper.",
+  "description_for_model": "Endpoints para gerar \u00e1udio TTS (ElevenLabs) e transcrever (Whisper).",
   "auth": {
     "type": "none"
   },
