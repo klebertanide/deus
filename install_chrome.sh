@@ -13,3 +13,9 @@ echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" \
 apt-get update -qq
 apt-get install -y -qq google-chrome-stable
 echo "✔ Chrome instalado"
+
+git add install_chrome.sh
+git update-index --chmod=+x install_chrome.sh
+
+
+
