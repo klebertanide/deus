@@ -1,0 +1,37 @@
+openapi: 3.0.1
+info:
+  title: Brilho do Sol Nascente - API
+  version: '1.0'
+servers:
+  - url: https://brilho.onrender.com
+paths:
+  /falar:
+    post:
+      summary: Gera um áudio a partir de um texto
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                texto:
+                  type: string
+      responses:
+        '200':
+          description: URL do áudio gerado
+  /transcrever:
+    post:
+      summary: Transcreve um áudio em texto com minutagem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url:
+                  type: string
+      responses:
+        '200':
+          description: Transcrição do áudio
