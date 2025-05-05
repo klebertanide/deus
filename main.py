@@ -1,4 +1,4 @@
-import os, uuid, io
+import os, uuid, io, csv
 import requests
 from flask import Flask, request, jsonify, send_from_directory
 from pathlib import Path
@@ -9,14 +9,18 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# Pasta de áudios
+# Diretórios
 AUDIO_DIR = Path(os.getenv("AUDIO_DIR", "audio"))
 AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 
-# Chaves das APIs
+CSV_DIR = Path("csv")
+CSV_DIR.mkdir(parents=True, exist_ok=True)
+
+# ElevenLabs + OpenAI
 ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY") or os.getenv("ELEVEN_API_KEY")
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+# ----------- FALAR --------------------------
 def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN"):
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
     headers = {"xi-api-key": ELEVEN_API_KEY, "Content-Type": "application/json"}
@@ -40,31 +44,19 @@ def falar():
     texto = data.get("texto")
     if not texto:
         return jsonify({"error": "campo 'texto' obrigatório"}), 400
-
-    try:
-        audio_bytes = elevenlabs_tts(texto)
-        filename = f"{uuid.uuid4()}.mp3"
-        path = AUDIO_DIR / filename
-
-        with open(path, "wb") as f:
-            f.write(audio_bytes)
-
-        base_url = request.url_root.rstrip('/')
-        audio_url = f"{base_url}/audio/{filename}"
-        audio_html = f'<audio controls><source src="{audio_url}" type="audio/mpeg"></audio>'
-
-        return jsonify({
-            "audio_url": audio_url,
-            "audio_html": audio_html
-        })
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    audio_bytes = elevenlabs_tts(texto)
+    filename = f"{uuid.uuid4()}.mp3"
+    path = AUDIO_DIR / filename
+    with open(path, "wb") as f:
+        f.write(audio_bytes)
+    audio_url = request.url_root.rstrip('/') + '/audio/' + filename
+    return jsonify({"audio_url": audio_url})
 
 @app.route("/audio/<filename>")
-def baixar_audio(filename):
+def servir_audio(filename):
     return send_from_directory(AUDIO_DIR, filename)
 
+# ----------- TRANSCRITAR --------------------------
 def _get_audio_file(audio_url):
     if audio_url.startswith(request.url_root.rstrip('/')):
         fname = audio_url.split('/audio/')[-1]
@@ -74,7 +66,7 @@ def _get_audio_file(audio_url):
     resp = requests.get(audio_url, timeout=60)
     resp.raise_for_status()
     buf = io.BytesIO(resp.content)
-    buf.name = "remoto.mp3"
+    buf.name = "remote.mp3"
     return buf
 
 @app.route("/transcrever", methods=["POST"])
@@ -105,5 +97,41 @@ def transcrever():
         except:
             pass
 
-if __name__ == "__main__":
-    app.run(debug=True)
+# ----------- GERAR CSV --------------------------
+@app.route("/gerar_csv", methods=["POST"])
+def gerar_csv():
+    data = request.get_json(force=True, silent=True) or {}
+    tipo = data.get("tipo", "").lower()
+    quantidade = int(data.get("quantidade", 1))
+
+    if tipo not in ["video", "carrossel"]:
+        return jsonify({"error": "Tipo deve ser 'video' ou 'carrossel'"}), 400
+
+    filename = f"{uuid.uuid4()}.csv"
+    path = CSV_DIR / filename
+
+    header = [
+        "PROMPT", "VISIBILITY", "ASPECT_RATIO", "MAGIC_PROMPT", "MODEL",
+        "SEED_NUMBER", "RENDERING", "NEGATIVE_PROMPT", "STYLE", "COLOR_PALETTE"
+    ]
+
+    negative_prompt = "low quality, overexposed, underexposed, extra limbs, extra fingers, missing fingers, disfigured, deformed, bad anatomy, crooked eyes, mutated hands"
+
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(header)
+        for i in range(quantidade):
+            if tipo == "video":
+                prompt = f'"Sunrise over a misty bamboo forest, ukiyo-e style, cinematic lighting, stunning composition"'
+                row = [prompt, "PRIVATE", "9:16", "ON", "3.0", "", "TURBO", negative_prompt, "AUTO", ""]
+            else:
+                prompt = f'"Beautiful minimalist inspirational quote layout, centered text in Helvetica, watermark @BrilhodoSolNascente in the corner, elegant design"'
+                row = [prompt, "PRIVATE", "4:5", "ON", "3.0", "", "TURBO", negative_prompt, "AUTO", ""]
+            writer.writerow(row)
+
+    file_url = request.url_root.rstrip("/") + f"/csv/{filename}"
+    return jsonify({"csv_url": file_url})
+
+@app.route("/csv/<filename>")
+def servir_csv(filename):
+    return send_from_directory(CSV_DIR, filename)
