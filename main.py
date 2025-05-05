@@ -1,18 +1,19 @@
-import os, uuid, io, tempfile
+import os, uuid, io
 import requests
 from flask import Flask, request, jsonify, send_from_directory
 from pathlib import Path
 from openai import OpenAI
 from dotenv import load_dotenv
 
-load_dotenv()  # lê .env se existir
+load_dotenv()
 
 app = Flask(__name__)
 
-# ----------- Áudio (já existente) --------------------------
+# Pasta de áudios
 AUDIO_DIR = Path(os.getenv("AUDIO_DIR", "audio"))
 AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 
+# Chaves das APIs
 ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY") or os.getenv("ELEVEN_API_KEY")
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -31,15 +32,7 @@ def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN"):
     }
     r = requests.post(url, headers=headers, json=payload, stream=True, timeout=60)
     r.raise_for_status()
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmpfile:
-        for chunk in r.iter_content(chunk_size=4096):
-            if chunk:
-                tmpfile.write(chunk)
-        tmpfile_path = tmpfile.name
-
-    with open(tmpfile_path, "rb") as f:
-        return f.read()
+    return r.content
 
 @app.route("/falar", methods=["POST"])
 def falar():
@@ -47,13 +40,30 @@ def falar():
     texto = data.get("texto")
     if not texto:
         return jsonify({"error": "campo 'texto' obrigatório"}), 400
-    audio_bytes = elevenlabs_tts(texto)
-    filename = f"{uuid.uuid4()}.mp3"
-    path = AUDIO_DIR / filename
-    with open(path, "wb") as f:
-        f.write(audio_bytes)
-    audio_url = request.url_root.rstrip('/') + '/audio/' + filename
-    return jsonify({"audio_url": audio_url})
+
+    try:
+        audio_bytes = elevenlabs_tts(texto)
+        filename = f"{uuid.uuid4()}.mp3"
+        path = AUDIO_DIR / filename
+
+        with open(path, "wb") as f:
+            f.write(audio_bytes)
+
+        base_url = request.url_root.rstrip('/')
+        audio_url = f"{base_url}/audio/{filename}"
+        audio_html = f'<audio controls><source src="{audio_url}" type="audio/mpeg"></audio>'
+
+        return jsonify({
+            "audio_url": audio_url,
+            "audio_html": audio_html
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/audio/<filename>")
+def baixar_audio(filename):
+    return send_from_directory(AUDIO_DIR, filename)
 
 def _get_audio_file(audio_url):
     if audio_url.startswith(request.url_root.rstrip('/')):
@@ -64,7 +74,7 @@ def _get_audio_file(audio_url):
     resp = requests.get(audio_url, timeout=60)
     resp.raise_for_status()
     buf = io.BytesIO(resp.content)
-    buf.name = "remote.mp3"
+    buf.name = "remoto.mp3"
     return buf
 
 @app.route("/transcrever", methods=["POST"])
@@ -94,3 +104,6 @@ def transcrever():
             audio_file.close()
         except:
             pass
+
+if __name__ == "__main__":
+    app.run(debug=True)
