@@ -31,7 +31,15 @@ def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN"):
     }
     r = requests.post(url, headers=headers, json=payload, stream=True, timeout=60)
     r.raise_for_status()
-    return r.content
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmpfile:
+        for chunk in r.iter_content(chunk_size=4096):
+            if chunk:
+                tmpfile.write(chunk)
+        tmpfile_path = tmpfile.name
+
+    with open(tmpfile_path, "rb") as f:
+        return f.read()
 
 @app.route("/falar", methods=["POST"])
 def falar():
@@ -86,4 +94,3 @@ def transcrever():
             audio_file.close()
         except:
             pass
-
