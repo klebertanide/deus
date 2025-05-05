@@ -7,6 +7,6 @@ on:
 jobs:
   ping:
     runs-on: ubuntu-latest
-      steps:
+    steps:
       - name: Curl Render URL
         run: curl -m 20 -s -o /dev/null https://brilho-sol-nascente.onrender.com/ || true
