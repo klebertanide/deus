@@ -44,18 +44,16 @@ def falar():
     return jsonify({"audio_url": audio_url})
 
 def _get_audio_file(audio_url):
-    """Returns a file-like obj for Whisper."""
     if audio_url.startswith(request.url_root.rstrip('/')):
         fname = audio_url.split('/audio/')[-1]
         p = AUDIO_DIR / fname
         if p.exists():
             return open(p, 'rb')
-    # fallback to remote fetch
     resp = requests.get(audio_url, timeout=60)
     resp.raise_for_status()
-    file_obj = io.BytesIO(resp.content)
-    file_obj.name = "remote.mp3"
-    return file_obj
+    buf = io.BytesIO(resp.content)
+    buf.name = "remote.mp3"
+    return buf
 
 @app.route("/transcrever", methods=["POST"])
 def transcrever():
@@ -71,11 +69,13 @@ def transcrever():
             response_format="verbose_json",
             timestamp_granularities=["segment"]
         )
+        # OpenAI v1 returns a pydantic model; access attrs directly
+        duration = transcript.duration
         segments = [
-            {"inicio": seg["start"], "fim": seg["end"], "texto": seg["text"]}
-            for seg in transcript["segments"]
+            {"inicio": seg.start, "fim": seg.end, "texto": seg.text}
+            for seg in transcript.segments
         ]
-        return jsonify({"duracao_total": transcript.get("duration"), "transcricao": segments})
+        return jsonify({"duracao_total": duration, "transcricao": segments})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
