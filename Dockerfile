@@ -1,24 +1,26 @@
-# ── Dockerfile ───────────────────────────────────────────────
+# Usa uma imagem base com Python 3.11
 FROM python:3.11-slim
 
-# Instala dependências de sistema + Google Chrome
-RUN apt-get update -qq && \
-    apt-get install -y -qq wget gnupg ca-certificates fonts-liberation && \
-    wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add - && \
-    echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" \
-        > /etc/apt/sources.list.d/google.list && \
-    apt-get update -qq && \
-    apt-get install -y -qq google-chrome-stable && \
-    rm -rf /var/lib/apt/lists/*
+# Evita prompts durante instalação
+ENV DEBIAN_FRONTEND=noninteractive
 
-# ---- Python libs ----
+# Instala dependências do sistema (inclui navegador pro Selenium)
+RUN apt-get update && apt-get install -y \
+    wget unzip gnupg curl fonts-liberation libnss3 libxss1 libasound2 \
+    libatk-bridge2.0-0 libgtk-3-0 libgbm1 chromium chromium-driver \
+    && rm -rf /var/lib/apt/lists/*
+
+# Define diretório de trabalho
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia todo o projeto
+# Copia os arquivos da aplicação
 COPY . .
 
-ENV PORT=3000
+# Instala dependências Python
+RUN pip install --upgrade pip && pip install -r requirements.txt
+
+# Expõe a porta usada pela aplicação
+EXPOSE 3000
+
+# Comando para iniciar a aplicação
 CMD ["python", "main.py"]
-# ─────────────────────────────────────────────────────────────
