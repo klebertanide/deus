@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# instala dependências de Playwright + baixa o Chromium interno
 set -e
 echo "▶ Instalando Playwright + Chromium"
 pip install --no-cache-dir --upgrade pip
