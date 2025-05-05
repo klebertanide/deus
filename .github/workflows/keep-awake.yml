@@ -1,1 +1,11 @@
-
+name: Keep Render Awake
+on:
+  schedule:
+    # roda a cada 14 minutos
+    - cron: "*/14 * * * *"
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Curl Render URL
+        run: curl -m 20 -s https://brilho-sol-nascente.onrender.com/ || true
