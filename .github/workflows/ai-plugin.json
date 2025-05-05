@@ -1,0 +1,18 @@
+{
+  "schema_version": "v1",
+  "name_for_human": "Brilho do Sol Nascente",
+  "name_for_model": "brilho_sol_nascente",
+  "description_for_human": "Gera narrações em áudio e devolve transcrição minuteada usando IA.",
+  "description_for_model": "Use this API to turn text into Brazilian Portuguese speech (ElevenLabs) and get a timestamped transcription via Whisper. First call POST /falar with {texto}. Then call POST /transcrever with {audio_url}.",
+  "auth": {
+    "type": "none"
+  },
+  "api": {
+    "type": "openapi",
+    "url": "https://brilho-sol-nascente.onrender.com/static/.well-known/openapi.json",
+    "is_user_authenticated": false
+  },
+  "logo_url": "https://brilho-sol-nascente.onrender.com/static/logo.png",
+  "contact_email": "klebertanide@example.com",
+  "legal_info_url": "https://github.com/klebertanide/voz-transcricao-api#readme"
+}
