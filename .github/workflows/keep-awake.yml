@@ -10,3 +10,4 @@ jobs:
     steps:
       - name: Curl Render URL
         run: curl -m 20 -s -o /dev/null https://brilho-sol-nascente.onrender.com/ || true
+        
