@@ -1,0 +1,76 @@
+openapi: 3.1.0
+info:
+  title: Brilho do Sol Nascente API
+  version: "1.1.0"
+  description: >-
+    Endpoints para gerar áudio com ElevenLabs e transcrever com Whisper‐1,
+    devolvendo minutagem (inicio/fim) e texto de cada segmento.
+servers:
+  - url: https://brilho-sol-nascente.onrender.com
+paths:
+  /falar:
+    post:
+      summary: Gera áudio TTS na ElevenLabs
+      operationId: gerarAudio
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                texto:
+                  type: string
+                  description: Texto a ser narrado
+                voice_id:
+                  type: string
+                  description: ID da voz ElevenLabs (opcional)
+              required:
+                - texto
+      responses:
+        "200":
+          description: URL do áudio MP3
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  audio_url:
+                    type: string
+  /transcrever:
+    post:
+      summary: Transcreve áudio e devolve minutagem
+      operationId: transcreverAudio
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                audio_url:
+                  type: string
+                  description: URL do áudio que será transcrito
+              required:
+                - audio_url
+      responses:
+        "200":
+          description: Transcrição segmentada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  duracao_total:
+                    type: number
+                  transcricao:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        inicio:
+                          type: number
+                        fim:
+                          type: number
+                        texto:
+                          type: string
