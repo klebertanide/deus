@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.zip
+*.log
+*.db
+*.sqlite3
+*.env
+.env*
+audio/
+ideogram_zips/
+static/
+.DS_Store
+.vscode/
+.git/
