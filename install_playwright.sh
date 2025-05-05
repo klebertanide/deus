@@ -1,3 +1,5 @@
-#!/usr/bin/env bash
+#!/bin/bash
+echo "▶ Instalando Playwright + Chromium"
+pip install --upgrade pip
 pip install -r requirements.txt
-python -m playwright install chromium
+playwright install chromium
