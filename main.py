@@ -1,15 +1,15 @@
-import os, uuid, io, tempfile, csv
+import os, uuid, io
 import requests
 from flask import Flask, request, jsonify, send_from_directory
 from pathlib import Path
 from openai import OpenAI
 from dotenv import load_dotenv
+import csv
 
 load_dotenv()
-
 app = Flask(__name__)
 
-# Diretórios
+# Pastas de saída
 AUDIO_DIR = Path(os.getenv("AUDIO_DIR", "audio"))
 CSV_DIR = Path("csv")
 AUDIO_DIR.mkdir(parents=True, exist_ok=True)
@@ -19,7 +19,7 @@ CSV_DIR.mkdir(parents=True, exist_ok=True)
 ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY") or os.getenv("ELEVEN_API_KEY")
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# TTS ElevenLabs
+# ===== /falar =====
 def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN"):
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
     headers = {"xi-api-key": ELEVEN_API_KEY, "Content-Type": "application/json"}
@@ -51,10 +51,7 @@ def falar():
     audio_url = request.url_root.rstrip('/') + '/audio/' + filename
     return jsonify({"audio_url": audio_url})
 
-@app.route("/audio/<filename>")
-def get_audio(filename):
-    return send_from_directory(AUDIO_DIR, filename)
-
+# ===== /transcrever =====
 def _get_audio_file(audio_url):
     if audio_url.startswith(request.url_root.rstrip('/')):
         fname = audio_url.split('/audio/')[-1]
@@ -95,40 +92,54 @@ def transcrever():
         except:
             pass
 
+# ===== /gerar_csv =====
 @app.route("/gerar_csv", methods=["POST"])
 def gerar_csv():
     data = request.get_json(force=True, silent=True) or {}
-    prompts = data.get("prompts")
-    if not prompts or not isinstance(prompts, list):
-        return jsonify({"error": "campo 'prompts' obrigatório (lista)"}), 400
+    modo = data.get("modo")
+    prompts = data.get("prompts", [])
+
+    if modo not in ["video", "carrossel"]:
+        return jsonify({"error": "modo deve ser 'video' ou 'carrossel'"}), 400
+    if not prompts:
+        return jsonify({"error": "lista 'prompts' obrigatória"}), 400
 
     filename = f"{uuid.uuid4()}.csv"
     path = CSV_DIR / filename
-    with open(path, "w", newline='', encoding='utf-8') as f:
+
+    header = [
+        "PROMPT", "VISIBILITY", "ASPECT_RATIO", "MAGIC_PROMPT", "MODEL",
+        "SEED_NUMBER", "RENDERING", "NEGATIVE_PROMPT", "STYLE", "COLOR_PALETTE"
+    ]
+    negative_prompt = "low quality, overexposed, underexposed, extra limbs, extra fingers, missing fingers, disfigured, deformed, bad anatomy, crooked eyes, mutated hands"
+
+    aspect_ratio = "9:16" if modo == "video" else "4:5"
+
+    with open(path, "w", newline='', encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow([
-            "PROMPT", "VISIBILITY", "ASPECT_RATIO", "MAGIC_PROMPT", "MODEL",
-            "SEED_NUMBER", "RENDERING", "NEGATIVE_PROMPT", "STYLE", "COLOR_PALETTE"
-        ])
+        writer.writerow(header)
         for prompt in prompts:
+            if modo == "carrossel":
+                prompt = f'"{prompt} (helvetica legível, marca d’água com @BrilhodoSolNascente no canto inferior)"'
+            elif "," in prompt:
+                prompt = f'"{prompt}"'
             writer.writerow([
-                prompt,
-                "PRIVATE",
-                "9:16",
-                "ON",
-                "3.0",
-                "",
-                "TURBO",
-                "low quality, overexposed, underexposed, extra limbs, extra fingers, missing fingers, disfigured, deformed, bad anatomy, crooked eyes, mutated hands",
-                "AUTO",
-                ""
+                prompt, "PRIVATE", aspect_ratio, "ON", "3.0", "", "TURBO",
+                negative_prompt, "AUTO", ""
             ])
+
     csv_url = request.url_root.rstrip('/') + '/csv/' + filename
     return jsonify({"csv_url": csv_url})
 
-@app.route("/csv/<filename>")
-def download_csv(filename):
-    return send_from_directory(CSV_DIR, filename, as_attachment=True)
+# ===== Servir arquivos =====
+@app.route("/audio/<path:filename>")
+def baixar_audio(filename):
+    return send_from_directory(AUDIO_DIR, filename)
 
+@app.route("/csv/<path:filename>")
+def baixar_csv(filename):
+    return send_from_directory(CSV_DIR, filename)
+
+# ===== Run local (opcional) =====
 if __name__ == "__main__":
-    app.run(debug=True, port=3000)
+    app.run(debug=True)
