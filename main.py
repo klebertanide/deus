@@ -1,25 +1,27 @@
 import os, uuid, io, time, tempfile
+from pathlib import Path
 import requests
 from flask import Flask, request, jsonify, send_from_directory
-from pathlib import Path
 from openai import OpenAI
-from dotenv import load_dotenv
 
-# Playwright
-from playwright.sync_api import sync_playwright
+# --- NOVOS imports para automação Ideogram -----------------
+from dotenv import load_dotenv
+import undetected_chromedriver as uc
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+# -----------------------------------------------------------
 
 load_dotenv()
 
 app = Flask(__name__)
+
+# ----------- ÁUDIO com ElevenLabs --------------------------
 AUDIO_DIR = Path(os.getenv("AUDIO_DIR", "audio"))
 AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 
-ZIP_DIR = Path(os.getenv("ZIP_DIR", "ideogram_zips"))
-ZIP_DIR.mkdir(parents=True, exist_ok=True)
-
 ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY") or os.getenv("ELEVEN_API_KEY")
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-IDEO_COOKIE = os.getenv("IDEO_SESSION")
 
 def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN"):
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
@@ -96,7 +98,11 @@ def transcrever():
 def serve_audio(filename):
     return send_from_directory(AUDIO_DIR, filename, mimetype="audio/mpeg")
 
-# -------------- IDEOGRAM ------------------------
+# ---------- IDEOGRAM batch image generator -----------------
+IDEO_COOKIE = os.getenv("IDEO_SESSION")  # variável protegida via Render
+BATCH_URL = "https://about.ideogram.ai/batch"
+ZIP_DIR = Path(os.getenv("ZIP_DIR", "ideogram_zips"))
+ZIP_DIR.mkdir(parents=True, exist_ok=True)
 
 def _create_batch_csv(prompts, csv_path):
     header = ("PROMPT,VISIBILITY,ASPECT_RATIO,MAGIC_PROMPT,MODEL,"
@@ -109,43 +115,40 @@ def _create_batch_csv(prompts, csv_path):
             row = f"\"{p}\",PRIVATE,1:1,ON,2a-turbo,,FAST,\"{negative}\",AUTO,\n"
             f.write(row)
 
-def _upload_and_download_playwright(prompts):
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context()
-        page = context.new_page()
+def _upload_and_download(csv_path):
+    opts = uc.ChromeOptions()
+    prefs = {"download.default_directory": str(ZIP_DIR.resolve())}
+    opts.add_experimental_option("prefs", prefs)
+    driver = uc.Chrome(options=opts, headless=True)
 
-        # Adiciona cookies
-        if IDEO_COOKIE:
-            for item in IDEO_COOKIE.split(";"):
-                if "=" in item:
-                    name, val = item.strip().split("=", 1)
-                    context.add_cookies([{
-                        "name": name,
-                        "value": val,
-                        "domain": ".ideogram.ai",
-                        "path": "/"
-                    }])
+    driver.get("https://ideogram.ai")
+    for item in IDEO_COOKIE.split(";"):
+        if "=" in item:
+            name, val = item.strip().split("=", 1)
+            driver.add_cookie({"name": name, "value": val, "domain": ".ideogram.ai"})
 
-        csv_path = Path(tempfile.gettempdir()) / f"{uuid.uuid4()}.csv"
-        _create_batch_csv(prompts, csv_path)
+    driver.get(BATCH_URL)
 
-        page.goto("https://about.ideogram.ai/batch")
-        input_file = page.locator("input[type='file']")
-        input_file.set_input_files(str(csv_path))
+    input_box = WebDriverWait(driver, 15).until(
+        EC.presence_of_element_located((By.CSS_SELECTOR, 'input[type=file]'))
+    )
+    input_box.send_keys(str(csv_path))
+    driver.find_element(By.XPATH, "//button[contains(.,'Generate')]").click()
 
-        page.get_by_role("button", name="Generate").click()
+    WebDriverWait(driver, 600).until(
+        EC.presence_of_element_located((By.XPATH, "//a[contains(.,'Download')]"))
+    ).click()
 
-        # Aguarda botão de download aparecer
-        page.wait_for_selector("a:has-text('Download')", timeout=60000)
-        with page.expect_download() as download_info:
-            page.locator("a:has-text('Download')").click()
-        download = download_info.value
-        zip_path = ZIP_DIR / f"{uuid.uuid4()}.zip"
-        download.save_as(str(zip_path))
+    zip_file = None
+    for _ in range(300):
+        zips = list(ZIP_DIR.glob("*.zip"))
+        if zips:
+            zip_file = zips[0]
+            break
+        time.sleep(2)
 
-        browser.close()
-        return zip_path
+    driver.quit()
+    return zip_file
 
 @app.route("/ideogram", methods=["POST"])
 def ideogram():
@@ -153,18 +156,30 @@ def ideogram():
     prompts = data.get("prompts")
     if not prompts or not isinstance(prompts, list):
         return jsonify({"error": "campo 'prompts' deve ser lista"}), 400
+
+    tmp_csv = Path(tempfile.gettempdir()) / f"{uuid.uuid4()}.csv"
+    _create_batch_csv(prompts, tmp_csv)
+
     try:
-        zip_path = _upload_and_download_playwright(prompts)
-        static_dir = Path("static")
-        static_dir.mkdir(exist_ok=True)
-        dest = static_dir / zip_path.name
-        zip_path.replace(dest)
-        zip_url = request.url_root.rstrip('/') + '/static/' + dest.name
-        return jsonify({"zip_url": zip_url})
+        zip_path = _upload_and_download(tmp_csv)
+        if not zip_path:
+            return jsonify({"error": "timeout ao gerar imagens"}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    finally:
+        try:
+            tmp_csv.unlink(missing_ok=True)
+        except:
+            pass
 
-# ----------------------------------------------
+    static_dir = Path("static")
+    static_dir.mkdir(exist_ok=True)
+    dest = static_dir / zip_path.name
+    zip_path.replace(dest)
+    zip_url = request.url_root.rstrip('/') + '/static/' + dest.name
+    return jsonify({"zip_url": zip_url})
+
+# ----------------------------------------------------------------------
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 3000)))
