@@ -1,6 +1,7 @@
 name: Keep Render Awake
 on:
   schedule:
+    # roda a cada 14 minutos
     - cron: "*/14 * * * *"
 jobs:
   ping:
