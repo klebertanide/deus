@@ -1,0 +1,18 @@
+{
+  "schema_version": "v1",
+  "name_for_human": "Brilho do Sol Nascente",
+  "name_for_model": "brilho_sol_nascente",
+  "description_for_human": "Gera voz com ElevenLabs, transcreve áudios e cria CSVs para vídeos e imagens com timestamps.",
+  "description_for_model": "Use esta API para gerar áudios com ElevenLabs, transcrever arquivos MP3 com Whisper, aceitar uploads manuais de áudio e gerar arquivos CSV com tempos de entrada de imagens. Todos os arquivos são armazenados automaticamente no Google Drive.",
+  "auth": {
+    "type": "none"
+  },
+  "api": {
+    "type": "openapi",
+    "url": "https://brilho-sol-nascente.onrender.com/openapi.json",
+    "has_user_authentication": false
+  },
+  "logo_url": "https://brilho-sol-nascente.onrender.com/static/logo.png",
+  "contact_email": "klebertanide@gmail.com",
+  "legal_info_url": "https://brilho-sol-nascente.onrender.com/politica"
+}
