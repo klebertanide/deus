@@ -12,8 +12,10 @@ app = Flask(__name__)
 # Pastas de saída
 AUDIO_DIR = Path(os.getenv("AUDIO_DIR", "audio"))
 CSV_DIR = Path("csv")
+SRT_DIR = Path("srt")
 AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 CSV_DIR.mkdir(parents=True, exist_ok=True)
+SRT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Chaves
 ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY") or os.getenv("ELEVEN_API_KEY")
@@ -51,6 +53,35 @@ def falar():
     audio_url = request.url_root.rstrip('/') + '/audio/' + filename
     return jsonify({"audio_url": audio_url})
 
+# ===== utilitário de legenda =====
+def gerar_srt(segments, filename):
+    def format_timestamp(seconds):
+        h = int(seconds // 3600)
+        m = int((seconds % 3600) // 60)
+        s = int(seconds % 60)
+        ms = int((seconds - int(seconds)) * 1000)
+        return f"{h:02}:{m:02}:{s:02},{ms:03}"
+
+    srt_path = SRT_DIR / filename
+    with open(srt_path, "w", encoding="utf-8") as f:
+        index = 1
+        for seg in segments:
+            words = seg["texto"].split()
+            if not words:
+                continue
+            inicio = seg["inicio"]
+            fim = seg["fim"]
+            duracao = (fim - inicio) / len(words)
+            for i in range(0, len(words), 4):
+                trecho = words[i:i+4]
+                trecho_inicio = inicio + (i * duracao)
+                trecho_fim = min(inicio + ((i+4) * duracao), fim)
+                f.write(f"{index}\n")
+                f.write(f"{format_timestamp(trecho_inicio)} --> {format_timestamp(trecho_fim)}\n")
+                f.write(" ".join(trecho) + "\n\n")
+                index += 1
+    return srt_path
+
 # ===== /transcrever =====
 def _get_audio_file(audio_url):
     if audio_url.startswith(request.url_root.rstrip('/')):
@@ -83,7 +114,16 @@ def transcrever():
             {"inicio": seg.start, "fim": seg.end, "texto": seg.text}
             for seg in transcript.segments
         ]
-        return jsonify({"duracao_total": duration, "transcricao": segments})
+
+        srt_name = f"{uuid.uuid4()}.srt"
+        gerar_srt(segments, srt_name)
+        srt_url = request.url_root.rstrip("/") + "/srt/" + srt_name
+
+        return jsonify({
+            "duracao_total": duration,
+            "transcricao": segments,
+            "srt_url": srt_url
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
@@ -112,7 +152,6 @@ def gerar_csv():
         "SEED_NUMBER", "RENDERING", "NEGATIVE_PROMPT", "STYLE", "COLOR_PALETTE"
     ]
     negative_prompt = "low quality, overexposed, underexposed, extra limbs, extra fingers, missing fingers, disfigured, deformed, bad anatomy, crooked eyes, mutated hands"
-
     aspect_ratio = "9:16" if modo == "video" else "4:5"
 
     with open(path, "w", newline='', encoding="utf-8") as f:
@@ -139,6 +178,10 @@ def baixar_audio(filename):
 @app.route("/csv/<path:filename>")
 def baixar_csv(filename):
     return send_from_directory(CSV_DIR, filename)
+
+@app.route("/srt/<path:filename>")
+def baixar_srt(filename):
+    return send_from_directory(SRT_DIR, filename)
 
 # ===== Run local (opcional) =====
 if __name__ == "__main__":
