@@ -8,15 +8,16 @@ from dotenv import load_dotenv
 load_dotenv()
 app = Flask(__name__)
 
-# Pastas de saída
-AUDIO_DIR = Path(os.getenv("AUDIO_DIR", "audio"))
+# Pastas
+AUDIO_DIR = Path("audio")
 CSV_DIR = Path("csv")
 AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 CSV_DIR.mkdir(parents=True, exist_ok=True)
 
 # Chaves
 ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY") or os.getenv("ELEVEN_API_KEY")
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+OPENAI_KEY = os.getenv("OPENAI_API_KEY")
+client = OpenAI(api_key=OPENAI_KEY)
 
 # ===== /falar =====
 def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN"):
@@ -97,19 +98,18 @@ def gerar_csv():
     data = request.get_json(force=True, silent=True) or {}
     modo = data.get("modo")
     prompts = data.get("prompts", [])
-    tempos = data.get("tempos", [])
 
     if modo not in ["video", "carrossel"]:
         return jsonify({"error": "modo deve ser 'video' ou 'carrossel'"}), 400
-    if not prompts or not tempos or len(prompts) != len(tempos):
-        return jsonify({"error": "listas 'prompts' e 'tempos' obrigatórias e com o mesmo tamanho"}), 400
+    if not prompts:
+        return jsonify({"error": "lista 'prompts' obrigatória"}), 400
 
     filename = f"{uuid.uuid4()}.csv"
     path = CSV_DIR / filename
 
     header = [
         "PROMPT", "VISIBILITY", "ASPECT_RATIO", "MAGIC_PROMPT", "MODEL",
-        "SEED_NUMBER", "RENDERING", "NEGATIVE_PROMPT", "STYLE", "COLOR_PALETTE", "TEMPO"
+        "SEED_NUMBER", "RENDERING", "NEGATIVE_PROMPT", "STYLE", "COLOR_PALETTE"
     ]
     negative_prompt = "low quality, overexposed, underexposed, extra limbs, extra fingers, missing fingers, disfigured, deformed, bad anatomy, crooked eyes, mutated hands"
     aspect_ratio = "9:16" if modo == "video" else "4:5"
@@ -117,14 +117,14 @@ def gerar_csv():
     with open(path, "w", newline='', encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(header)
-        for prompt, tempo in zip(prompts, tempos):
+        for prompt in prompts:
             if modo == "carrossel":
                 prompt = f'"{prompt} (helvetica legível, marca d’água com @BrilhodoSolNascente no canto inferior)"'
             elif "," in prompt:
                 prompt = f'"{prompt}"'
             writer.writerow([
                 prompt, "PRIVATE", aspect_ratio, "ON", "3.0", "", "TURBO",
-                negative_prompt, "AUTO", "", int(round(tempo))
+                negative_prompt, "AUTO", ""
             ])
 
     csv_url = request.url_root.rstrip('/') + '/csv/' + filename
@@ -139,6 +139,6 @@ def baixar_audio(filename):
 def baixar_csv(filename):
     return send_from_directory(CSV_DIR, filename)
 
-# ===== Run local =====
+# ===== Run local (opcional) =====
 if __name__ == "__main__":
     app.run(debug=True)
