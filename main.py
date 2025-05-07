@@ -95,19 +95,37 @@ def transcrever():
 @app.route("/gerar_csv", methods=["POST"])
 def gerar_csv():
     data = request.get_json(force=True, silent=True) or {}
-    transcricao = data.get("transcricao")
-    if not transcricao or not isinstance(transcricao, list):
-        return jsonify({"error": "campo 'transcricao' inválido ou ausente"}), 400
+    modo = data.get("modo")
+    prompts = data.get("prompts", [])
+    tempos = data.get("tempos", [])
+
+    if modo not in ["video", "carrossel"]:
+        return jsonify({"error": "modo deve ser 'video' ou 'carrossel'"}), 400
+    if not prompts or not tempos or len(prompts) != len(tempos):
+        return jsonify({"error": "listas 'prompts' e 'tempos' obrigatórias e com o mesmo tamanho"}), 400
 
     filename = f"{uuid.uuid4()}.csv"
     path = CSV_DIR / filename
 
+    header = [
+        "PROMPT", "VISIBILITY", "ASPECT_RATIO", "MAGIC_PROMPT", "MODEL",
+        "SEED_NUMBER", "RENDERING", "NEGATIVE_PROMPT", "STYLE", "COLOR_PALETTE", "TEMPO"
+    ]
+    negative_prompt = "low quality, overexposed, underexposed, extra limbs, extra fingers, missing fingers, disfigured, deformed, bad anatomy, crooked eyes, mutated hands"
+    aspect_ratio = "9:16" if modo == "video" else "4:5"
+
     with open(path, "w", newline='', encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["imagem", "tempo"])
-        for i, bloco in enumerate(transcricao, start=1):
-            tempo = round(bloco.get("inicio", 0))
-            writer.writerow([i, tempo])
+        writer.writerow(header)
+        for prompt, tempo in zip(prompts, tempos):
+            if modo == "carrossel":
+                prompt = f'"{prompt} (helvetica legível, marca d’água com @BrilhodoSolNascente no canto inferior)"'
+            elif "," in prompt:
+                prompt = f'"{prompt}"'
+            writer.writerow([
+                prompt, "PRIVATE", aspect_ratio, "ON", "3.0", "", "TURBO",
+                negative_prompt, "AUTO", "", int(round(tempo))
+            ])
 
     csv_url = request.url_root.rstrip('/') + '/csv/' + filename
     return jsonify({"csv_url": csv_url})
@@ -115,12 +133,12 @@ def gerar_csv():
 # ===== Servir arquivos =====
 @app.route("/audio/<path:filename>")
 def baixar_audio(filename):
-    return send_from_directory(AUDIO_DIR, filename, mimetype="audio/mpeg")
+    return send_from_directory(AUDIO_DIR, filename)
 
 @app.route("/csv/<path:filename>")
 def baixar_csv(filename):
-    return send_from_directory(CSV_DIR, filename, mimetype="text/csv")
+    return send_from_directory(CSV_DIR, filename)
 
-# ===== Run local (opcional) =====
+# ===== Run local =====
 if __name__ == "__main__":
     app.run(debug=True)
