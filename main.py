@@ -1,37 +1,58 @@
-import os, uuid, io, csv
-import requests
+import os, uuid, io, tempfile, csv
 from flask import Flask, request, jsonify, send_from_directory
 from pathlib import Path
 from openai import OpenAI
 from dotenv import load_dotenv
+import requests
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
+from googleapiclient.http import MediaIoBaseUpload
 
 load_dotenv()
 app = Flask(__name__)
 
-# Pastas locais
-AUDIO_DIR = Path("audio"); AUDIO_DIR.mkdir(exist_ok=True)
-CSV_DIR = Path("csv"); CSV_DIR.mkdir(exist_ok=True)
-
-# Chaves de API
-ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY") or os.getenv("ELEVEN_API_KEY")
-OPENAI_KEY = os.getenv("OPENAI_API_KEY")
-client = OpenAI(api_key=OPENAI_KEY)
+# Pastas locais (opcional, para fallback/testes)
+AUDIO_DIR = Path("audio")
+CSV_DIR = Path("csv")
+AUDIO_DIR.mkdir(exist_ok=True)
+CSV_DIR.mkdir(exist_ok=True)
 
 # Google Drive
-SERVICE_ACCOUNT_FILE = "credentials.json"  # caminho do seu arquivo .json
-FOLDER_ID = "18rmQa-kSLRdPROAMBKQyFR6vtzXIR0gI"
+DRIVE_FOLDER_ID = "18rmQa-kSLRdPROAMBKQyFR6vtzXIR0gI"
+SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+CREDENTIALS_FILE = "credentials.json"
 
-def upload_para_drive(caminho_local, nome_final):
-    creds = service_account.Credentials.from_service_account_file(
-        SERVICE_ACCOUNT_FILE, scopes=["https://www.googleapis.com/auth/drive"])
-    service = build("drive", "v3", credentials=creds)
-    file_metadata = {"name": nome_final, "parents": [FOLDER_ID]}
-    media = MediaFileUpload(caminho_local, resumable=True)
-    file = service.files().create(body=file_metadata, media_body=media, fields="id").execute()
-    return f"https://drive.google.com/file/d/{file['id']}/view"
+credentials = service_account.Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=SCOPES)
+drive_service = build("drive", "v3", credentials=credentials)
+
+# ElevenLabs + OpenAI
+ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+def upload_to_drive(file_bytes, filename, mimetype):
+    media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype=mimetype, resumable=True)
+    file_metadata = {"name": filename, "parents": [DRIVE_FOLDER_ID]}
+    file = drive_service.files().create(body=file_metadata, media_body=media, fields="id").execute()
+    file_id = file.get("id")
+    return f"https://drive.google.com/uc?id={file_id}&export=download"
+
+# ===== /upload_audio =====
+@app.route("/upload_audio", methods=["POST"])
+def upload_audio():
+    if "file" not in request.files:
+        return jsonify({"error": "Arquivo MP3 não enviado"}), 400
+
+    file = request.files["file"]
+    if not file.filename.endswith(".mp3"):
+        return jsonify({"error": "Formato inválido. Envie um arquivo .mp3"}), 400
+
+    audio_bytes = file.read()
+    filename = f"{uuid.uuid4()}.mp3"
+    try:
+        public_url = upload_to_drive(audio_bytes, filename, "audio/mpeg")
+        return jsonify({"audio_url": public_url})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # ===== /falar =====
 def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN"):
@@ -57,23 +78,22 @@ def falar():
     texto = data.get("texto")
     if not texto:
         return jsonify({"error": "campo 'texto' obrigatório"}), 400
+
     audio_bytes = elevenlabs_tts(texto)
     filename = f"{uuid.uuid4()}.mp3"
-    path = AUDIO_DIR / filename
-    with open(path, "wb") as f:
-        f.write(audio_bytes)
-    drive_url = upload_para_drive(str(path), filename)
-    return jsonify({"audio_url": drive_url})
+    try:
+        public_url = upload_to_drive(audio_bytes, filename, "audio/mpeg")
+        return jsonify({"audio_url": public_url})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # ===== /transcrever =====
 def _get_audio_file(audio_url):
-    if audio_url.startswith("http"):
-        r = requests.get(audio_url, timeout=60)
-        r.raise_for_status()
-        buf = io.BytesIO(r.content)
-        buf.name = "audio.mp3"
-        return buf
-    return None
+    resp = requests.get(audio_url, timeout=60)
+    resp.raise_for_status()
+    buf = io.BytesIO(resp.content)
+    buf.name = "audio.mp3"
+    return buf
 
 @app.route("/transcrever", methods=["POST"])
 def transcrever():
@@ -102,21 +122,27 @@ def transcrever():
 @app.route("/gerar_csv", methods=["POST"])
 def gerar_csv():
     data = request.get_json(force=True, silent=True) or {}
-    transcricao = data.get("transcricao")
+    transcricao = data.get("transcricao", [])
     if not transcricao:
-        return jsonify({"error": "campo 'transcricao' obrigatório"}), 400
+        return jsonify({"error": "lista 'transcricao' obrigatória"}), 400
 
     filename = f"{uuid.uuid4()}.csv"
     path = CSV_DIR / filename
-    with open(path, "w", newline='', encoding="utf-8") as f:
+
+    with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        for idx, bloco in enumerate(transcricao):
-            segundos = round(bloco["inicio"])
-            writer.writerow([idx + 1, segundos])
+        for i, bloco in enumerate(transcricao):
+            segundo = int(bloco["inicio"])
+            writer.writerow([i + 1, segundo])
 
-    drive_url = upload_para_drive(str(path), filename)
-    return jsonify({"csv_url": drive_url})
+    with open(path, "rb") as f:
+        csv_bytes = f.read()
+    try:
+        public_url = upload_to_drive(csv_bytes, filename, "text/csv")
+        return jsonify({"csv_url": public_url})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-# ===== Run Local =====
+# ===== Run local =====
 if __name__ == "__main__":
     app.run(debug=True)
