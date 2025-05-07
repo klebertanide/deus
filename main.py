@@ -1,26 +1,42 @@
-import os, uuid, io, tempfile, requests, csv
+import os, uuid, io, tempfile
+import requests
 from flask import Flask, request, jsonify, send_from_directory
 from pathlib import Path
 from openai import OpenAI
 from dotenv import load_dotenv
+import csv
 
 load_dotenv()
 app = Flask(__name__)
 
 AUDIO_DIR = Path("audio")
 CSV_DIR = Path("csv")
-AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-CSV_DIR.mkdir(parents=True, exist_ok=True)
+SRT_DIR = Path("srt")
+ZIP_DIR = Path("zips")
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+for d in [AUDIO_DIR, CSV_DIR, SRT_DIR, ZIP_DIR]:
+    d.mkdir(parents=True, exist_ok=True)
+
 ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY") or os.getenv("ELEVEN_API_KEY")
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# ===== /falar =====
-def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN"):
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
+def upload_to_transfersh(path):
+    with open(path, "rb") as f:
+        response = requests.put(f"https://transfer.sh/{path.name}", data=f)
+        response.raise_for_status()
+        return response.text.strip()
+
+@app.route("/falar", methods=["POST"])
+def falar():
+    data = request.get_json(force=True, silent=True) or {}
+    texto = data.get("texto")
+    if not texto:
+        return jsonify({"error": "campo 'texto' obrigatório"}), 400
+
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/cwIsrQsWEVTols6slKYN/stream"
     headers = {"xi-api-key": ELEVEN_API_KEY, "Content-Type": "application/json"}
     payload = {
-        "text": text,
+        "text": texto,
         "model_id": "eleven_multilingual_v2",
         "voice_settings": {
             "stability": 0.60,
@@ -29,31 +45,15 @@ def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN"):
             "use_speaker_boost": True
         }
     }
-    r = requests.post(url, headers=headers, json=payload, stream=True, timeout=60)
+    r = requests.post(url, headers=headers, json=payload, stream=True)
     r.raise_for_status()
-    return r.content
-
-@app.route("/falar", methods=["POST"])
-def falar():
-    data = request.get_json(force=True, silent=True) or {}
-    texto = data.get("texto")
-    if not texto:
-        return jsonify({"error": "campo 'texto' obrigatório"}), 400
-    audio_bytes = elevenlabs_tts(texto)
     filename = f"{uuid.uuid4()}.mp3"
     path = AUDIO_DIR / filename
     with open(path, "wb") as f:
-        f.write(audio_bytes)
+        f.write(r.content)
+    public_url = upload_to_transfersh(path)
+    return jsonify({"audio_url": public_url})
 
-    # Envia para transfer.sh
-    with open(path, "rb") as f:
-        r = requests.post(f"https://transfer.sh/{filename}", files={"file": f})
-        r.raise_for_status()
-        audio_url = r.text.strip()
-
-    return jsonify({"audio_url": audio_url})
-
-# ===== /transcrever =====
 @app.route("/transcrever", methods=["POST"])
 def transcrever():
     data = request.get_json(force=True, silent=True) or {}
@@ -61,57 +61,61 @@ def transcrever():
     if not audio_url:
         return jsonify({"error": "campo 'audio_url' obrigatório"}), 400
     try:
-        audio_file = requests.get(audio_url, timeout=60)
-        audio_file.raise_for_status()
-        buf = io.BytesIO(audio_file.content)
-        buf.name = "audio.mp3"
+        response = requests.get(audio_url, timeout=60)
+        response.raise_for_status()
+        audio_file = io.BytesIO(response.content)
+        audio_file.name = "audio.mp3"
 
         transcript = client.audio.transcriptions.create(
             model="whisper-1",
-            file=buf,
+            file=audio_file,
             response_format="verbose_json",
             timestamp_granularities=["segment"]
         )
-        duration = transcript.duration
-        segments = [
-            {"inicio": seg.start, "fim": seg.end, "texto": seg.text}
-            for seg in transcript.segments
-        ]
-        return jsonify({"duracao_total": duration, "transcricao": segments})
+
+        segments = transcript.segments
+        filename_base = uuid.uuid4().hex
+
+        # CSV simples
+        csv_path = CSV_DIR / f"{filename_base}.csv"
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["imagem", "entrada"])
+            for idx, seg in enumerate(segments, 1):
+                writer.writerow([idx, round(seg.start)])
+
+        # SRT com limite de 4 palavras por linha
+        srt_path = SRT_DIR / f"{filename_base}.srt"
+        with open(srt_path, "w", encoding="utf-8") as f:
+            for i, seg in enumerate(segments, 1):
+                palavras = seg.text.strip().split()
+                blocos = [" ".join(palavras[i:i+4]) for i in range(0, len(palavras), 4)]
+                for j, bloco in enumerate(blocos):
+                    ini = seg.start + j * ((seg.end - seg.start) / len(blocos))
+                    fim = ini + ((seg.end - seg.start) / len(blocos))
+                    ini_str = format_time(ini)
+                    fim_str = format_time(fim)
+                    f.write(f"{i}-{j+1}\n{ini_str} --> {fim_str}\n{bloco}\n\n")
+
+        # ZIP com arquivos
+        zip_path = ZIP_DIR / f"{filename_base}.zip"
+        from zipfile import ZipFile
+        with ZipFile(zip_path, 'w') as z:
+            z.write(csv_path, arcname=csv_path.name)
+            z.write(srt_path, arcname=srt_path.name)
+
+        zip_url = upload_to_transfersh(zip_path)
+        return jsonify({"zip_url": zip_url})
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ===== /gerar_csv =====
-@app.route("/gerar_csv", methods=["POST"])
-def gerar_csv():
-    data = request.get_json(force=True, silent=True) or {}
-    transcricao = data.get("transcricao", [])
+def format_time(seconds):
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    ms = int((seconds - int(seconds)) * 1000)
+    return f"{h:02}:{m:02}:{s:02},{ms:03}"
 
-    if not transcricao:
-        return jsonify({"error": "lista 'transcricao' obrigatória"}), 400
-
-    filename = f"{uuid.uuid4()}.csv"
-    path = CSV_DIR / filename
-
-    with open(path, "w", newline='', encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["imagem", "tempo_segundos"])
-        for idx, bloco in enumerate(transcricao, start=1):
-            tempo = int(bloco["inicio"])
-            writer.writerow([idx, tempo])
-
-    csv_url = request.url_root.rstrip('/') + '/csv/' + filename
-    return jsonify({"csv_url": csv_url})
-
-# ===== Servir arquivos =====
-@app.route("/csv/<path:filename>")
-def baixar_csv(filename):
-    return send_from_directory(CSV_DIR, filename)
-
-@app.route("/audio/<path:filename>")
-def baixar_audio(filename):
-    return send_from_directory(AUDIO_DIR, filename)
-
-# ===== Run local =====
 if __name__ == "__main__":
     app.run(debug=True)
