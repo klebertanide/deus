@@ -8,17 +8,15 @@ from dotenv import load_dotenv
 load_dotenv()
 app = Flask(__name__)
 
-# Pastas de saída
-AUDIO_DIR = Path("audio")
+AUDIO_DIR = Path(os.getenv("AUDIO_DIR", "audio"))
 CSV_DIR = Path("csv")
-AUDIO_DIR.mkdir(exist_ok=True)
-CSV_DIR.mkdir(exist_ok=True)
+AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+CSV_DIR.mkdir(parents=True, exist_ok=True)
 
-# Chaves
 ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY") or os.getenv("ELEVEN_API_KEY")
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# ===== /falar =====
+# ========= /falar =========
 def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN"):
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
     headers = {"xi-api-key": ELEVEN_API_KEY, "Content-Type": "application/json"}
@@ -50,15 +48,15 @@ def falar():
     audio_url = request.url_root.rstrip('/') + '/audio/' + filename
     return jsonify({"audio_url": audio_url})
 
-# ===== /upload_audio =====
+# ========= /upload_audio =========
 @app.route("/upload_audio", methods=["POST"])
 def upload_audio():
-    if "file" not in request.files:
+    if 'file' not in request.files:
         return jsonify({"error": "campo 'file' obrigatório"}), 400
 
-    file = request.files["file"]
-    if file.filename == "":
-        return jsonify({"error": "arquivo sem nome"}), 400
+    file = request.files['file']
+    if not file.filename.endswith(".mp3"):
+        return jsonify({"error": "apenas arquivos .mp3 são aceitos"}), 400
 
     filename = f"{uuid.uuid4()}.mp3"
     path = AUDIO_DIR / filename
@@ -67,7 +65,7 @@ def upload_audio():
     audio_url = request.url_root.rstrip('/') + '/audio/' + filename
     return jsonify({"audio_url": audio_url})
 
-# ===== /transcrever =====
+# ========= /transcrever =========
 def _get_audio_file(audio_url):
     if audio_url.startswith(request.url_root.rstrip('/')):
         fname = audio_url.split('/audio/')[-1]
@@ -95,11 +93,11 @@ def transcrever():
             timestamp_granularities=["segment"]
         )
         duration = transcript.duration
-        blocos = [
+        segments = [
             {"inicio": seg.start, "fim": seg.end, "texto": seg.text}
             for seg in transcript.segments
         ]
-        return jsonify({"duracao_total": duration, "transcricao": blocos})
+        return jsonify({"duracao_total": duration, "transcricao": segments})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
@@ -108,28 +106,27 @@ def transcrever():
         except:
             pass
 
-# ===== /gerar_csv =====
+# ========= /gerar_csv =========
 @app.route("/gerar_csv", methods=["POST"])
 def gerar_csv():
     data = request.get_json(force=True, silent=True) or {}
-    transcricao = data.get("transcricao", [])
+    transcricao = data.get("transcricao")
     if not transcricao:
-        return jsonify({"error": "campo 'transcricao' obrigatório"}), 400
+        return jsonify({"error": "lista 'transcricao' obrigatória"}), 400
 
     filename = f"{uuid.uuid4()}.csv"
     path = CSV_DIR / filename
 
     with open(path, "w", newline='', encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["imagem", "segundo"])
-        for i, bloco in enumerate(transcricao):
-            segundo = round(bloco.get("inicio", 0))
-            writer.writerow([i + 1, segundo])
+        for i, bloco in enumerate(transcricao, start=1):
+            inicio = int(round(bloco.get("inicio", 0)))
+            writer.writerow([i, inicio])
 
     csv_url = request.url_root.rstrip('/') + '/csv/' + filename
     return jsonify({"csv_url": csv_url})
 
-# ===== Servir arquivos =====
+# ========= arquivos estáticos =========
 @app.route("/audio/<path:filename>")
 def baixar_audio(filename):
     return send_from_directory(AUDIO_DIR, filename)
@@ -138,6 +135,5 @@ def baixar_audio(filename):
 def baixar_csv(filename):
     return send_from_directory(CSV_DIR, filename)
 
-# ===== Execução local opcional =====
 if __name__ == "__main__":
     app.run(debug=True)
