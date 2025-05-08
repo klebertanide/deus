@@ -10,3 +10,6 @@ numpy
 torch
 torchaudio
 git+https://github.com/m-bain/whisperx.git
+google-api-python-client
+google-auth
+google-auth-oauthlib
