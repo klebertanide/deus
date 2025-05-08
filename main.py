@@ -19,7 +19,7 @@ ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY") or os.getenv("ELEVEN_API_KEY")
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 client = OpenAI(api_key=OPENAI_KEY)
 
-# ===== /falar =====
+# ===== ElevenLabs =====
 def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN"):
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
     headers = {"xi-api-key": ELEVEN_API_KEY, "Content-Type": "application/json"}
@@ -51,7 +51,7 @@ def falar():
     audio_url = request.url_root.rstrip('/') + '/audio/' + filename
     return jsonify({"audio_url": audio_url})
 
-# ===== /transcrever =====
+# ===== Whisper Transcrição =====
 def _get_audio_file(audio_url):
     if audio_url.startswith(request.url_root.rstrip('/')):
         fname = audio_url.split('/audio/')[-1]
@@ -92,7 +92,7 @@ def transcrever():
         except:
             pass
 
-# ===== /gerar_csv =====
+# ===== CSV para Ideogram =====
 @app.route("/gerar_csv", methods=["POST"])
 def gerar_csv():
     data = request.get_json(force=True, silent=True) or {}
@@ -114,7 +114,6 @@ def gerar_csv():
     with open(path, "w", newline='', encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(header)
-
         for bloco, prompt in zip(transcricao, prompts):
             segundo = int(round(bloco.get("inicio", 0)))
             prompt_final = f'{segundo} - Painting style: Traditional Japanese oriental watercolor, with soft brush strokes and handmade paper texture. {prompt}'
@@ -137,6 +136,5 @@ def baixar_audio(filename):
 def baixar_csv(filename):
     return send_from_directory(CSV_DIR, filename)
 
-# ===== Run local (opcional) =====
 if __name__ == "__main__":
     app.run(debug=True)
