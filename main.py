@@ -137,4 +137,4 @@ def baixar_csv(filename):
     return send_from_directory(CSV_DIR, filename)
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
