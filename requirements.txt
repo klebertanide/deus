@@ -9,4 +9,3 @@ pandas
 numpy
 torch
 torchaudio
-git+https://github.com/m-bain/whisperx.git
