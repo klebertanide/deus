@@ -1,9 +1,12 @@
-import os, uuid, io, csv, zipfile
+import os, uuid, io, csv, zipfile, json
 import requests
 from flask import Flask, request, jsonify, send_from_directory
 from pathlib import Path
 from openai import OpenAI
 from dotenv import load_dotenv
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 
 load_dotenv()
 app = Flask(__name__)
@@ -22,7 +25,20 @@ for d in [AUDIO_DIR, CSV_DIR, TXT_DIR, SRT_DIR, ZIP_DIR]:
 ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY") or os.getenv("ELEVEN_API_KEY")
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# ===== Função ElevenLabs =====
+# ===== Google Drive Setup =====
+def upload_to_drive(local_path, remote_name):
+    creds_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
+    folder_id = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
+    if not creds_json or not folder_id:
+        return None
+    creds = service_account.Credentials.from_service_account_info(json.loads(creds_json))
+    service = build("drive", "v3", credentials=creds)
+    file_metadata = {"name": remote_name, "parents": [folder_id]}
+    media = MediaFileUpload(local_path, resumable=True)
+    uploaded = service.files().create(body=file_metadata, media_body=media, fields="id").execute()
+    return f"https://drive.google.com/file/d/{uploaded.get('id')}/view"
+
+# ===== ElevenLabs TTS =====
 def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN"):
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
     headers = {"xi-api-key": ELEVEN_API_KEY, "Content-Type": "application/json"}
@@ -40,7 +56,7 @@ def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN"):
     r.raise_for_status()
     return r.content
 
-# ===== Falar + Transcrever + CSV + SRT + ZIP =====
+# ===== Processar =====
 @app.route("/processar", methods=["POST"])
 def processar():
     data = request.get_json(force=True, silent=True) or {}
@@ -116,13 +132,17 @@ def processar():
             z.write(srt_path, arcname="legenda.srt")
             z.write(txt_path, arcname="descricao.txt")
 
+        # ===== Upload no Google Drive =====
+        drive_url = upload_to_drive(zip_path, f"{filename_base}.zip")
+
         base = request.url_root.rstrip("/")
         return jsonify({
             "voz_mp3": f"{base}/audio/{mp3_path.name}",
             "imagens_csv": f"{base}/csv/{csv_path.name}",
             "legenda_srt": f"{base}/srt/{srt_path.name}",
             "descricao_txt": f"{base}/txt/{txt_path.name}",
-            "pacote_zip": f"{base}/zip/{zip_path.name}"
+            "pacote_zip": f"{base}/zip/{zip_path.name}",
+            "drive_url": drive_url
         })
 
     except Exception as e:
