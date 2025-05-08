@@ -16,7 +16,4 @@ COPY . .
 # Instala as dependências do projeto
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
-# Instala o Playwright e seus navegadores
-RUN playwright install chromium
-
 CMD ["python", "main.py"]
