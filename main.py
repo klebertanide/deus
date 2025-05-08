@@ -25,7 +25,7 @@ for d in [AUDIO_DIR, CSV_DIR, TXT_DIR, SRT_DIR, ZIP_DIR]:
 ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY") or os.getenv("ELEVEN_API_KEY")
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# ===== Google Drive Setup =====
+# Google Drive
 def upload_to_drive(local_path, remote_name):
     creds_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
     folder_id = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
@@ -38,7 +38,7 @@ def upload_to_drive(local_path, remote_name):
     uploaded = service.files().create(body=file_metadata, media_body=media, fields="id").execute()
     return f"https://drive.google.com/file/d/{uploaded.get('id')}/view"
 
-# ===== ElevenLabs TTS =====
+# ElevenLabs
 def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN"):
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
     headers = {"xi-api-key": ELEVEN_API_KEY, "Content-Type": "application/json"}
@@ -56,7 +56,15 @@ def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN"):
     r.raise_for_status()
     return r.content
 
-# ===== Processar =====
+# Utilitário para legenda SRT
+def format_ts(seconds):
+    ms = int((seconds % 1) * 1000)
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    return f"{h:02}:{m:02}:{s:02},{ms:03}"
+
+# Processamento
 @app.route("/processar", methods=["POST"])
 def processar():
     data = request.get_json(force=True, silent=True) or {}
@@ -71,24 +79,24 @@ def processar():
         uid = str(uuid.uuid4())
         filename_base = f"brilho_{uid}"
 
-        # ===== Gerar áudio =====
+        # Áudio
         audio_bytes = elevenlabs_tts(texto)
         mp3_path = AUDIO_DIR / f"{filename_base}.mp3"
         with open(mp3_path, "wb") as f:
             f.write(audio_bytes)
 
-        # ===== Transcrever =====
-        audio_file = open(mp3_path, "rb")
-        transcript = client.audio.transcriptions.create(
-            model="whisper-1",
-            file=audio_file,
-            response_format="verbose_json",
-            temperature=0,
-            timestamp_granularities=["segment"]
-        )
+        # Transcrição
+        with open(mp3_path, "rb") as audio_file:
+            transcript = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file,
+                response_format="verbose_json",
+                temperature=0,
+                timestamp_granularities=["segment"]
+            )
         segments = transcript.segments
 
-        # ===== SRT =====
+        # SRT
         srt_path = SRT_DIR / f"{filename_base}.srt"
         with open(srt_path, "w", encoding="utf-8") as srt:
             for i, seg in enumerate(segments, 1):
@@ -97,7 +105,7 @@ def processar():
                 text = seg.text.strip()
                 srt.write(f"{i}\n{ini} --> {fim}\n{text}\n\n")
 
-        # ===== CSV =====
+        # CSV
         if len(prompts) != len(segments):
             return jsonify({"error": "A quantidade de prompts deve ser igual à de segmentos do áudio."}), 400
 
@@ -119,12 +127,12 @@ def processar():
                     "AUTO", ""
                 ])
 
-        # ===== TXT (descrição) =====
+        # TXT
         txt_path = TXT_DIR / f"{filename_base}.txt"
         with open(txt_path, "w", encoding="utf-8") as f:
             f.write(descricao.strip())
 
-        # ===== ZIP =====
+        # ZIP
         zip_path = ZIP_DIR / f"{filename_base}.zip"
         with zipfile.ZipFile(zip_path, "w") as z:
             z.write(mp3_path, arcname="voz.mp3")
@@ -132,7 +140,7 @@ def processar():
             z.write(srt_path, arcname="legenda.srt")
             z.write(txt_path, arcname="descricao.txt")
 
-        # ===== Upload no Google Drive =====
+        # Drive
         drive_url = upload_to_drive(zip_path, f"{filename_base}.zip")
 
         base = request.url_root.rstrip("/")
@@ -147,21 +155,8 @@ def processar():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-    finally:
-        try:
-            audio_file.close()
-        except:
-            pass
 
-# ===== Utilitário para SRT =====
-def format_ts(seconds):
-    ms = int((seconds % 1) * 1000)
-    h = int(seconds // 3600)
-    m = int((seconds % 3600) // 60)
-    s = int(seconds % 60)
-    return f"{h:02}:{m:02}:{s:02},{ms:03}"
-
-# ===== Servir arquivos =====
+# Servir arquivos
 @app.route("/audio/<path:filename>")
 def download_audio(filename):
     return send_from_directory(AUDIO_DIR, filename)
@@ -182,6 +177,5 @@ def download_txt(filename):
 def download_zip(filename):
     return send_from_directory(ZIP_DIR, filename)
 
-# ===== Local run =====
 if __name__ == "__main__":
     app.run(debug=True)
