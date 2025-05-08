@@ -38,7 +38,7 @@ def upload_to_drive(local_path, remote_name):
     uploaded = service.files().create(body=file_metadata, media_body=media, fields="id").execute()
     return f"https://drive.google.com/file/d/{uploaded.get('id')}/view"
 
-# ElevenLabs
+# ElevenLabs com tratamento de erro robusto
 def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN"):
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
     headers = {"xi-api-key": ELEVEN_API_KEY, "Content-Type": "application/json"}
@@ -52,11 +52,16 @@ def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN"):
             "use_speaker_boost": True
         }
     }
-    r = requests.post(url, headers=headers, json=payload, stream=True, timeout=60)
-    r.raise_for_status()
-    return r.content
+    try:
+        r = requests.post(url, headers=headers, json=payload, stream=True, timeout=60)
+        r.raise_for_status()
+        return r.content
+    except requests.exceptions.HTTPError as e:
+        raise Exception(f"Erro ElevenLabs ({r.status_code}): {r.text}")
+    except Exception as e:
+        raise Exception(f"Falha na comunicação com ElevenLabs: {str(e)}")
 
-# Utilitário para legenda SRT
+# SRT formatter
 def format_ts(seconds):
     ms = int((seconds % 1) * 1000)
     h = int(seconds // 3600)
@@ -64,7 +69,6 @@ def format_ts(seconds):
     s = int(seconds % 60)
     return f"{h:02}:{m:02}:{s:02},{ms:03}"
 
-# Processamento
 @app.route("/processar", methods=["POST"])
 def processar():
     data = request.get_json(force=True, silent=True) or {}
@@ -79,7 +83,7 @@ def processar():
         uid = str(uuid.uuid4())
         filename_base = f"brilho_{uid}"
 
-        # Áudio
+        # Geração de áudio
         audio_bytes = elevenlabs_tts(texto)
         mp3_path = AUDIO_DIR / f"{filename_base}.mp3"
         with open(mp3_path, "wb") as f:
@@ -96,16 +100,13 @@ def processar():
             )
         segments = transcript.segments
 
-        # SRT
+        # Legenda SRT
         srt_path = SRT_DIR / f"{filename_base}.srt"
         with open(srt_path, "w", encoding="utf-8") as srt:
             for i, seg in enumerate(segments, 1):
-                ini = format_ts(seg.start)
-                fim = format_ts(seg.end)
-                text = seg.text.strip()
-                srt.write(f"{i}\n{ini} --> {fim}\n{text}\n\n")
+                srt.write(f"{i}\n{format_ts(seg.start)} --> {format_ts(seg.end)}\n{seg.text.strip()}\n\n")
 
-        # CSV
+        # CSV para imagens Ideogram
         if len(prompts) != len(segments):
             return jsonify({"error": "A quantidade de prompts deve ser igual à de segmentos do áudio."}), 400
 
@@ -127,12 +128,12 @@ def processar():
                     "AUTO", ""
                 ])
 
-        # TXT
+        # Descrição
         txt_path = TXT_DIR / f"{filename_base}.txt"
         with open(txt_path, "w", encoding="utf-8") as f:
             f.write(descricao.strip())
 
-        # ZIP
+        # Compactar em ZIP
         zip_path = ZIP_DIR / f"{filename_base}.zip"
         with zipfile.ZipFile(zip_path, "w") as z:
             z.write(mp3_path, arcname="voz.mp3")
@@ -140,7 +141,7 @@ def processar():
             z.write(srt_path, arcname="legenda.srt")
             z.write(txt_path, arcname="descricao.txt")
 
-        # Drive
+        # Upload no Google Drive
         drive_url = upload_to_drive(zip_path, f"{filename_base}.zip")
 
         base = request.url_root.rstrip("/")
@@ -156,7 +157,7 @@ def processar():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Servir arquivos
+# Rotas de arquivos
 @app.route("/audio/<path:filename>")
 def download_audio(filename):
     return send_from_directory(AUDIO_DIR, filename)
@@ -177,5 +178,6 @@ def download_txt(filename):
 def download_zip(filename):
     return send_from_directory(ZIP_DIR, filename)
 
+# Iniciar localmente
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
