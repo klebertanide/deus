@@ -1,25 +1,60 @@
-import os, uuid, io, csv
+import os, uuid, io, csv, zipfile, base64
 import requests
 from flask import Flask, request, jsonify, send_from_directory
 from pathlib import Path
 from openai import OpenAI
 from dotenv import load_dotenv
+from datetime import datetime
 
 load_dotenv()
 app = Flask(__name__)
 
 # Pastas
-AUDIO_DIR = Path("audio")
-CSV_DIR = Path("csv")
-AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-CSV_DIR.mkdir(parents=True, exist_ok=True)
+BASE = Path(".")
+AUDIO_DIR = BASE / "downloads/audio"
+CSV_DIR = BASE / "downloads/csv"
+TXT_DIR = BASE / "downloads/txt"
+ZIP_DIR = BASE / "downloads/zip"
+for d in [AUDIO_DIR, CSV_DIR, TXT_DIR, ZIP_DIR]:
+    d.mkdir(parents=True, exist_ok=True)
 
 # Chaves
-ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY") or os.getenv("ELEVEN_API_KEY")
+ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 client = OpenAI(api_key=OPENAI_KEY)
 
-# ===== ElevenLabs =====
+# GitHub
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+GITHUB_REPO = os.getenv("GITHUB_REPO")  # Ex: "usuario/repositorio"
+GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "main")
+
+# ===== Upload GitHub =====
+def upload_to_github(filepath: Path, github_path: str):
+    if not GITHUB_TOKEN or not GITHUB_REPO:
+        return None
+
+    with open(filepath, "rb") as f:
+        content = base64.b64encode(f.read()).decode("utf-8")
+
+    api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{github_path}"
+    headers = {
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github+json"
+    }
+
+    commit_message = f"Upload automático de {filepath.name} ({datetime.utcnow().isoformat()}Z)"
+    data = {
+        "message": commit_message,
+        "content": content,
+        "branch": GITHUB_BRANCH
+    }
+
+    response = requests.put(api_url, headers=headers, json=data)
+    if response.status_code in [200, 201]:
+        return response.json()["content"]["html_url"]
+    return None
+
+# ===== ElevenLabs TTS =====
 def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN"):
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
     headers = {"xi-api-key": ELEVEN_API_KEY, "Content-Type": "application/json"}
@@ -37,24 +72,34 @@ def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN"):
     r.raise_for_status()
     return r.content
 
+# ===== /falar =====
 @app.route("/falar", methods=["POST"])
 def falar():
     data = request.get_json(force=True, silent=True) or {}
     texto = data.get("texto")
     if not texto:
         return jsonify({"error": "campo 'texto' obrigatório"}), 400
+
     audio_bytes = elevenlabs_tts(texto)
     filename = f"{uuid.uuid4()}.mp3"
     path = AUDIO_DIR / filename
+
     with open(path, "wb") as f:
         f.write(audio_bytes)
-    audio_url = request.url_root.rstrip('/') + '/audio/' + filename
-    return jsonify({"audio_url": audio_url})
 
-# ===== Whisper Transcrição =====
+    # GitHub backup opcional
+    github_url = upload_to_github(path, f"audio/{filename}")
+
+    url_base = request.url_root.rstrip("/")
+    return jsonify({
+        "audio_url": f"{url_base}/downloads/audio/{filename}",
+        "github_backup": github_url
+    })
+
+# ===== /transcrever =====
 def _get_audio_file(audio_url):
     if audio_url.startswith(request.url_root.rstrip('/')):
-        fname = audio_url.split('/audio/')[-1]
+        fname = audio_url.split('/downloads/audio/')[-1]
         p = AUDIO_DIR / fname
         if p.exists():
             return open(p, 'rb')
@@ -92,7 +137,7 @@ def transcrever():
         except:
             pass
 
-# ===== CSV para Ideogram =====
+# ===== /gerar_csv =====
 @app.route("/gerar_csv", methods=["POST"])
 def gerar_csv():
     data = request.get_json(force=True, silent=True) or {}
@@ -124,17 +169,21 @@ def gerar_csv():
                 negative_prompt, "AUTO", ""
             ])
 
-    csv_url = request.url_root.rstrip('/') + '/csv/' + filename
-    return jsonify({"csv_url": csv_url})
+    # GitHub opcional
+    github_url = upload_to_github(path, f"csv/{filename}")
 
-# ===== Servir arquivos =====
-@app.route("/audio/<path:filename>")
-def baixar_audio(filename):
-    return send_from_directory(AUDIO_DIR, filename)
+    url_base = request.url_root.rstrip("/")
+    return jsonify({
+        "csv_url": f"{url_base}/downloads/csv/{filename}",
+        "github_backup": github_url
+    })
 
-@app.route("/csv/<path:filename>")
-def baixar_csv(filename):
-    return send_from_directory(CSV_DIR, filename)
+# ===== Servir arquivos públicos =====
+@app.route("/downloads/<path:folder>/<path:filename>")
+def baixar_download(folder, filename):
+    folder_path = BASE / "downloads" / folder
+    return send_from_directory(folder_path, filename)
 
+# ===== Run local =====
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+    app.run(debug=True)
