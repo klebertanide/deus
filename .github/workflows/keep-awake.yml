@@ -2,11 +2,13 @@ name: Keep Render Awake
 
 on:
   schedule:
-    - cron: "*/14 * * * *"
+    - cron: '*/15 * * * *'  # a cada 15 minutos (UTC)
+  workflow_dispatch:        # permite execução manual
 
 jobs:
-  ping:
+  ping-app:
     runs-on: ubuntu-latest
     steps:
-      - name: Curl Render URL
-      run: curl -m 20 -s -o /dev/null https://brilho-sol-nascente.onrender.com/ || true
+      - name: Ping API
+        run: |
+          curl -s --max-time 10 https://deus-w0i8.onrender.com || echo "API indisponível"
