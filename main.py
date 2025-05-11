@@ -116,7 +116,7 @@ def gerar_csv():
         return jsonify({"error": "É necessário fornecer listas 'transcricao' e 'prompts' com o mesmo tamanho."}), 400
 
     uid = str(uuid.uuid4())
-    base_name = f"brilho_{uid}"
+    base_name = f"deus_{uid}"
 
     # CSV
     csv_path = CSV_DIR / f"{base_name}.csv"
@@ -131,7 +131,7 @@ def gerar_csv():
         writer.writerow(header)
         for bloco, prompt in zip(transcricao, prompts):
             segundo = int(round(bloco.get("inicio", 0)))
-            prompt_final = f'{segundo} - Painting style: Traditional Japanese oriental watercolor, with soft brush strokes and handmade paper texture. {prompt}'
+            prompt_final = f'{segundo} - Painting style: Traditional watercolor, with soft brush strokes and handmade paper texture. {prompt}'
             if "," in prompt_final:
                 prompt_final = f'"{prompt_final}"'
             writer.writerow([
