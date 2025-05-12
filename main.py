@@ -196,6 +196,7 @@ def transcrever():
         return jsonify({"error": "campo 'audio_url' obrigatório"}), 400
 
     try:
+        # Baixa ou abre o arquivo de áudio
         if audio_url.startswith(request.url_root.rstrip('/')):
             fname = audio_url.split('/audio/')[-1]
             p = AUDIO_DIR / fname
@@ -206,8 +207,9 @@ def transcrever():
             resp = requests.get(audio_url, timeout=60)
             resp.raise_for_status()
             audio_file = io.BytesIO(resp.content)
-            audio_file.name = "remote.mp3"
+            audio_file.name = "audio.mp3"
 
+        # Transcreve usando Whisper da OpenAI
         transcript = openai.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file,
@@ -215,21 +217,24 @@ def transcrever():
             timestamp_granularities=["segment"]
         )
 
-        duration = transcript["duration"]
+        # Extrai dados corretamente usando atributos (não colchetes)
+        duration = transcript.duration
         segments = [
-            {"inicio": s["start"], "fim": s["end"], "texto": s["text"]}
-            for s in transcript["segments"]
+            {"inicio": s.start, "fim": s.end, "texto": s.text}
+            for s in transcript.segments
         ]
+
         return jsonify({"duracao_total": duration, "transcricao": segments})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
     finally:
         try:
             audio_file.close()
         except:
             pass
-
+            
 @app.route("/gerar_csv", methods=["POST"])
 def gerar_csv():
     data = request.get_json(force=True, silent=True) or {}
