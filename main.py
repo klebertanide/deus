@@ -1,4 +1,4 @@
-import os, uuid, io, csv, zipfile, re
+import os, uuid, io, csv, re
 import requests
 import unidecode
 from flask import Flask, request, jsonify, send_from_directory
@@ -6,10 +6,15 @@ from pathlib import Path
 from openai import OpenAI
 from dotenv import load_dotenv
 
+# Google Drive
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+
 load_dotenv()
 app = Flask(__name__)
 
-# Pastas
+# Pastas locais
 BASE = Path(".")
 AUDIO_DIR = BASE / "audio"
 CSV_DIR = BASE / "csv"
@@ -17,19 +22,56 @@ FILES_DIR = BASE / "downloads"
 for d in [AUDIO_DIR, CSV_DIR, FILES_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
+# Google Drive – pasta raiz (a que você compartilhou com a conta de serviço)
+GOOGLE_DRIVE_FOLDER_ID = "1d6RxnsYRS52oKUPGyuAfJZ00bksUUVI2"
+
 # Chaves
 ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY") or os.getenv("ELEVEN_API_KEY")
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 client = OpenAI(api_key=OPENAI_KEY)
 
-# ===== Função para criar slug do texto =====
+# Google Drive Auth
+def get_drive_service():
+    creds = service_account.Credentials.from_service_account_file(
+        "service_account.json",
+        scopes=["https://www.googleapis.com/auth/drive"]
+    )
+    return build("drive", "v3", credentials=creds)
+
 def slugify(texto, limite=30):
     texto = unidecode.unidecode(texto)
     texto = re.sub(r"[^\w\s]", "", texto)
     texto = texto.strip().replace(" ", "_")
     return texto[:limite].lower()
 
-# ===== ElevenLabs TTS =====
+# Upload para subpasta no Drive
+def criar_pasta_drive(slug, drive):
+    metadata = {
+        "name": f"deus_{slug}",
+        "mimeType": "application/vnd.google-apps.folder",
+        "parents": [GOOGLE_DRIVE_FOLDER_ID]
+    }
+    pasta = drive.files().create(body=metadata, fields="id").execute()
+    return pasta.get("id")
+
+def upload_arquivo_drive(filepath, filename, folder_id, drive):
+    file_metadata = {
+        "name": filename,
+        "parents": [folder_id]
+    }
+    media = MediaFileUpload(filepath, resumable=True)
+    file = drive.files().create(body=file_metadata, media_body=media, fields="id").execute()
+    return file.get("id")
+
+# Utilitário para legenda SRT
+def format_ts(seconds):
+    ms = int((seconds % 1) * 1000)
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    return f"{h:02}:{m:02}:{s:02},{ms:03}"
+
+# ElevenLabs TTS
 def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN"):
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
     headers = {"xi-api-key": ELEVEN_API_KEY, "Content-Type": "application/json"}
@@ -47,20 +89,10 @@ def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN"):
     r.raise_for_status()
     return r.content
 
-# ===== Utilitário para legenda SRT =====
-def format_ts(seconds):
-    ms = int((seconds % 1) * 1000)
-    h = int(seconds // 3600)
-    m = int((seconds % 3600) // 60)
-    s = int(seconds % 60)
-    return f"{h:02}:{m:02}:{s:02},{ms:03}"
-
-# ===== Rota inicial de teste =====
 @app.route("/")
 def home():
     return "API DeusTeEnviouIsso OK"
 
-# ===== Rota para gerar áudio =====
 @app.route("/falar", methods=["POST"])
 def falar():
     data = request.get_json(force=True, silent=True) or {}
@@ -83,7 +115,6 @@ def falar():
         "slug": slug
     })
 
-# ===== Rota para transcrever =====
 @app.route("/transcrever", methods=["POST"])
 def transcrever():
     data = request.get_json(force=True, silent=True) or {}
@@ -123,7 +154,6 @@ def transcrever():
         except:
             pass
 
-# ===== Rota para gerar arquivos finais =====
 @app.route("/gerar_csv", methods=["POST"])
 def gerar_csv():
     data = request.get_json(force=True, silent=True) or {}
@@ -131,15 +161,21 @@ def gerar_csv():
     prompts = data.get("prompts", [])
     descricao = data.get("descricao", "Descrição não fornecida")
     mp3_filename = data.get("mp3_filename")
-    slug = data.get("slug", str(uuid.uuid4()))  # se não vier, gera UUID
+    slug = data.get("slug", str(uuid.uuid4()))
 
     if not transcricao or not prompts or len(transcricao) != len(prompts):
         return jsonify({"error": "É necessário fornecer listas 'transcricao' e 'prompts' com o mesmo tamanho."}), 400
 
-    base_name = f"deus_{slug}"
+    drive = get_drive_service()
+    pasta_id = criar_pasta_drive(slug, drive)
+
+    # Arquivos locais
+    csv_path = CSV_DIR / f"{slug}.csv"
+    srt_path = FILES_DIR / f"{slug}.srt"
+    txt_path = FILES_DIR / f"{slug}.txt"
+    mp3_path = AUDIO_DIR / mp3_filename if mp3_filename else None
 
     # CSV
-    csv_path = CSV_DIR / f"{base_name}.csv"
     header = [
         "PROMPT", "VISIBILITY", "ASPECT_RATIO", "MAGIC_PROMPT", "MODEL",
         "SEED_NUMBER", "RENDERING", "NEGATIVE_PROMPT", "STYLE", "COLOR_PALETTE"
@@ -160,7 +196,6 @@ def gerar_csv():
             ])
 
     # SRT
-    srt_path = FILES_DIR / f"{base_name}.srt"
     with open(srt_path, "w", encoding="utf-8") as srt:
         for i, seg in enumerate(transcricao, 1):
             ini = format_ts(seg["inicio"])
@@ -169,31 +204,19 @@ def gerar_csv():
             srt.write(f"{i}\n{ini} --> {fim}\n{text}\n\n")
 
     # TXT
-    txt_path = FILES_DIR / f"{base_name}.txt"
     with open(txt_path, "w", encoding="utf-8") as f:
         f.write(descricao.strip())
 
-    # ZIP
-    zip_path = FILES_DIR / f"{base_name}.zip"
-    with zipfile.ZipFile(zip_path, "w") as z:
-        z.write(csv_path, arcname="imagens.csv")
-        z.write(srt_path, arcname="legenda.srt")
-        z.write(txt_path, arcname="descricao.txt")
+    # Upload para o Google Drive
+    upload_arquivo_drive(csv_path, "imagens.csv", pasta_id, drive)
+    upload_arquivo_drive(srt_path, "legenda.srt", pasta_id, drive)
+    upload_arquivo_drive(txt_path, "descricao.txt", pasta_id, drive)
+    if mp3_path and mp3_path.exists():
+        upload_arquivo_drive(mp3_path, "voz.mp3", pasta_id, drive)
 
-        if mp3_filename:
-            mp3_path = AUDIO_DIR / mp3_filename
-            if mp3_path.exists():
-                z.write(mp3_path, arcname="voz.mp3")
+    folder_url = f"https://drive.google.com/drive/folders/{pasta_id}"
+    return jsonify({ "folder_url": folder_url })
 
-    base_url = request.url_root.rstrip("/")
-    return jsonify({
-        "csv_url": f"{base_url}/csv/{csv_path.name}",
-        "srt_url": f"{base_url}/downloads/{srt_path.name}",
-        "txt_url": f"{base_url}/downloads/{txt_path.name}",
-        "zip_url": f"{base_url}/downloads/{zip_path.name}"
-    })
-
-# ===== Arquivos públicos =====
 @app.route("/audio/<path:filename>")
 def baixar_audio(filename):
     return send_from_directory(AUDIO_DIR, filename)
