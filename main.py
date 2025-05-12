@@ -133,7 +133,7 @@ def gerar_csv():
             segundo = int(round(bloco.get("inicio", 0)))
             prompt_final = f'{segundo} - Painting style: Traditional watercolor, with soft brush strokes and handmade paper texture. {prompt}'
             if "," in prompt_final:
-                prompt_final = f'"{prompt_final}"'
+                prompt_final = f'{prompt_final}'
             writer.writerow([
                 prompt_final, "PRIVATE", "9:16", "ON", "3.0", "", "TURBO",
                 negative_prompt, "AUTO", ""
