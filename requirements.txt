@@ -1,10 +1,11 @@
 Flask
 openai>=1.0.0
 moviepy==1.0.3
-numpy
+numpy==1.23.5
 unidecode
 requests
+python-dotenv
 google-api-python-client
 google-auth
 google-auth-oauthlib
-python-dotenv
+imageio-ffmpeg==0.4.7
