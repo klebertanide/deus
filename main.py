@@ -304,34 +304,40 @@ def gerar_csv():
 def upload_zip():
     file = request.files.get("zip")
     slug = request.form.get("slug")
-
     if not file or not slug:
         return jsonify({"error": "Requer 'zip' e 'slug'."}), 400
 
-    temp_dir = FILES_DIR / slug
+    temp_dir = FILES_DIR / f"{slug}_raw"
+    output_dir = FILES_DIR / slug
     temp_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Salva e descompacta o ZIP
     zip_path = temp_dir / "imagens.zip"
     file.save(zip_path)
 
+    # Extrair
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
         zip_ref.extractall(temp_dir)
 
-    # Busca imagens em qualquer subpasta
+    # Filtrar imagens
     imagens = sorted([
-        p for p in temp_dir.rglob("*")
-        if p.suffix.lower() in ['.jpg', '.jpeg', '.png']
-    ], key=lambda x: x.name)
+        f for f in temp_dir.glob("*") if f.suffix.lower() in [".jpg", ".jpeg", ".png"]
+    ])
 
-    if not imagens:
+    if len(imagens) < 1:
         return jsonify({"error": "Nenhuma imagem encontrada no ZIP."}), 400
+
+    # Selecionar automaticamente 8 imagens
+    selecionadas = imagens[:8]
+    for img in selecionadas:
+        destino = output_dir / img.name
+        img.rename(destino)
 
     return jsonify({
         "ok": True,
-        "total_imagens": len(imagens),
-        "imagens": [str(p.name) for p in imagens],
-        "path": str(temp_dir)
+        "slug": slug,
+        "total_encontradas": len(imagens),
+        "usadas": [f.name for f in selecionadas]
     })
 
 @app.route("/montar_video", methods=["POST"])
@@ -342,7 +348,10 @@ def montar_video():
     folder_id = data.get("folder_id")
 
     pasta_local = FILES_DIR / slug
-    imagens = sorted([f for f in pasta_local.iterdir() if f.suffix.lower() in ['.jpg', '.png'] and "sobrepor" not in f.name and "fechamento" not in f.name])
+    imagens = sorted([
+        f for f in (FILES_DIR / slug).iterdir()
+        if f.suffix.lower() in ['.jpg', '.jpeg', '.png']
+    ])
     if not imagens:
         return jsonify({"error": "Imagens não encontradas."}), 400
 
