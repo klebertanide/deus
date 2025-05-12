@@ -439,6 +439,14 @@ def montar_video():
 
     return jsonify({ "ok": True, "video": f"https://drive.google.com/drive/folders/{folder_id}" })
 
+@app.route('/.well-known/ai-plugin.json')
+def serve_ai_plugin():
+    return send_from_directory('.well-known', 'ai-plugin.json', mimetype='application/json')
+    
+@app.route('/.well-known/openapi.json')
+def serve_openapi():
+    return send_from_directory('.well-known', 'openapi.json', mimetype='application/json')
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)), debug=True)
     
