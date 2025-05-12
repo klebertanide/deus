@@ -4,7 +4,7 @@ import unidecode
 import numpy as np
 from flask import Flask, request, jsonify, send_from_directory
 from pathlib import Path
-from openai import OpenAI
+import openai
 from moviepy.editor import (
     AudioFileClip, ImageClip, TextClip, CompositeVideoClip,
     concatenate_videoclips, VideoFileClip
@@ -32,7 +32,7 @@ GOOGLE_DRIVE_FOLDER_ID = "1d6RxnsYRS52oKUPGyuAfJZ00bksUUVI2"
 # Chaves
 ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
-client = OpenAI(api_key=OPENAI_KEY)
+openai.api_key = OPENAI_KEY
 
 # Google Drive Auth
 def get_drive_service():
@@ -149,15 +149,18 @@ def transcrever():
             audio_file = io.BytesIO(resp.content)
             audio_file.name = "remote.mp3"
 
-        transcript = client.audio.transcriptions.create(
+        transcript = openai.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file,
             response_format="verbose_json",
             timestamp_granularities=["segment"]
         )
 
-        duration = transcript.duration
-        segments = [{"inicio": s.start, "fim": s.end, "texto": s.text} for s in transcript.segments]
+        duration = transcript["duration"]
+        segments = [
+            {"inicio": s["start"], "fim": s["end"], "texto": s["text"]}
+            for s in transcript["segments"]
+        ]
         return jsonify({"duracao_total": duration, "transcricao": segments})
 
     except Exception as e:
@@ -224,7 +227,7 @@ def gerar_csv():
     with open(txt_path, "w", encoding="utf-8") as f:
         f.write(descricao.strip())
 
-    # Upload obrigatório
+    # Upload
     upload_arquivo_drive(csv_path, "imagens.csv", pasta_id, drive)
     upload_arquivo_drive(srt_path, "legenda.srt", pasta_id, drive)
     upload_arquivo_drive(txt_path, "descricao.txt", pasta_id, drive)
@@ -303,6 +306,18 @@ def montar_video():
     upload_arquivo_drive(output_path, "video_final.mp4", folder_id, drive)
 
     return jsonify({ "ok": True, "video": f"https://drive.google.com/drive/folders/{folder_id}" })
+
+@app.route("/audio/<path:filename>")
+def baixar_audio(filename):
+    return send_from_directory(AUDIO_DIR, filename)
+
+@app.route("/csv/<path:filename>")
+def baixar_csv(filename):
+    return send_from_directory(CSV_DIR, filename)
+
+@app.route("/downloads/<path:filename>")
+def baixar_download(filename):
+    return send_from_directory(FILES_DIR, filename)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=True)
