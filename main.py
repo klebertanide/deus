@@ -76,37 +76,20 @@ def format_ts(seconds):
 
 import time  # já deve estar importado no topo, se não estiver, adicione
 
-
 def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN", retries=3):
     import time
 
-def enviar_requisicao(payload, tentativa_desc=""):
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
-    headers = {
-        "xi-api-key": ELEVEN_API_KEY,
-        "Content-Type": "application/json"
-    }
+    def enviar_requisicao(payload, tentativa_desc=""):
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
+        headers = {
+            "xi-api-key": ELEVEN_API_KEY,
+            "Content-Type": "application/json"
+        }
 
-    print(f"\n[DEBUG] Iniciando requisição {tentativa_desc}")
-    print(f"[DEBUG] URL: {url}")
-    print(f"[DEBUG] HEADERS: {headers}")
-    print(f"[DEBUG] PAYLOAD: {payload}")
+        print(f"\n[DEBUG] Iniciando requisição{tentativa_desc}")
+        print(f"[DEBUG] URL: {url}")
+        print(f"[DEBUG] PAYLOAD: {payload}")
 
-    for attempt in range(retries):
-        try:
-            print(f"[TTS] Tentativa {attempt + 1}{tentativa_desc}...")
-            response = requests.post(url, headers=headers, json=payload, stream=True, timeout=60)
-            if not response.ok:
-                print(f"[Erro ElevenLabs] Código: {response.status_code}")
-                print(f"Resposta: {response.text[:300]}")
-            response.raise_for_status()
-            return response.content
-        except requests.RequestException as e:
-            print(f"[Erro ElevenLabs] {tentativa_desc} tentativa {attempt + 1} falhou: {e}")
-            if attempt < retries - 1:
-                time.sleep(2 ** attempt)
-            else:
-                raise RuntimeError(f"Falha ao gerar áudio com ElevenLabs após múltiplas tentativas ({tentativa_desc}).") from e
         for attempt in range(retries):
             try:
                 print(f"[TTS] Tentativa {attempt + 1}{tentativa_desc}...")
@@ -121,9 +104,11 @@ def enviar_requisicao(payload, tentativa_desc=""):
                 if attempt < retries - 1:
                     time.sleep(2 ** attempt)
                 else:
-                    raise RuntimeError(f"Falha ao gerar áudio com ElevenLabs após múltiplas tentativas ({tentativa_desc}).") from e
+                    raise RuntimeError(
+                        f"Falha ao gerar áudio com ElevenLabs após múltiplas tentativas ({tentativa_desc})."
+                    ) from e
 
-    # 1º tentativa com 'style'
+    # 1ª tentativa com style
     payload_com_style = {
         "text": text,
         "voice_settings": {
@@ -134,11 +119,15 @@ def enviar_requisicao(payload, tentativa_desc=""):
     }
 
     try:
-        return enviar_requisicao(payload_com_style, tentativa_desc=" com style")
-    except RuntimeError:
-        print("[TTS] Falha com 'style'. Tentando novamente sem 'style'...")
+        result = enviar_requisicao(payload_com_style, " com style")
+        if not result:
+            raise ValueError("A resposta da API estava vazia (None)")
+        return result
+    except Exception as e:
+        print(f"[TTS] Falha com 'style': {e}")
+        print("[TTS] Tentando novamente sem 'style'...")
 
-        # 2º tentativa sem 'style'
+        # 2ª tentativa sem style
         payload_sem_style = {
             "text": text,
             "voice_settings": {
@@ -147,7 +136,10 @@ def enviar_requisicao(payload, tentativa_desc=""):
             }
         }
 
-        return enviar_requisicao(payload_sem_style, tentativa_desc=" sem style")
+        result = enviar_requisicao(payload_sem_style, " sem style")
+        if not result:
+            raise ValueError("A resposta da API estava vazia (None)")
+        return result
 
 def make_grain(size=(1280, 720), intensity=10):
     def make_frame(t):
@@ -176,7 +168,16 @@ def falar():
     filename = f"{slug}.mp3"
     path = AUDIO_DIR / filename
 
-    audio_bytes = elevenlabs_tts(texto)
+    try:
+        audio_bytes = elevenlabs_tts(texto)
+        if not audio_bytes:
+            raise ValueError("Nenhum conteúdo de áudio foi retornado.")
+    except Exception as e:
+        return jsonify({
+            "error": "Falha ao gerar áudio com ElevenLabs.",
+            "detalhe": str(e)
+        }), 500
+
     with open(path, "wb") as f:
         f.write(audio_bytes)
 
