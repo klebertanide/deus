@@ -76,42 +76,59 @@ def format_ts(seconds):
 
 import time  # já deve estar importado no topo, se não estiver, adicione
 
+
 def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN", retries=3):
     import time
 
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
-    headers = {
-        "xi-api-key": ELEVEN_API_KEY,
-        "Content-Type": "application/json"
-    }
+    def enviar_requisicao(payload, tentativa_desc=""):
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
+        headers = {
+            "xi-api-key": ELEVEN_API_KEY,
+            "Content-Type": "application/json"
+        }
 
-    payload = {
+        for attempt in range(retries):
+            try:
+                print(f"[TTS] Tentativa {attempt + 1}{tentativa_desc}...")
+                response = requests.post(url, headers=headers, json=payload, stream=True, timeout=60)
+                if not response.ok:
+                    print(f"[Erro ElevenLabs] Código: {response.status_code}")
+                    print(f"Resposta: {response.text[:300]}")
+                response.raise_for_status()
+                return response.content
+            except requests.RequestException as e:
+                print(f"[Erro ElevenLabs] {tentativa_desc} tentativa {attempt + 1} falhou: {e}")
+                if attempt < retries - 1:
+                    time.sleep(2 ** attempt)
+                else:
+                    raise RuntimeError(f"Falha ao gerar áudio com ElevenLabs após múltiplas tentativas ({tentativa_desc}).") from e
+
+    # 1º tentativa com 'style'
+    payload_com_style = {
         "text": text,
-        "model_id": "eleven_multilingual_v2",
         "voice_settings": {
             "stability": 0.6,
             "similarity_boost": 0.9,
-             "style": 0.2
+            "style": 0.2
         }
     }
 
-    for attempt in range(retries):
-        try:
-            response = requests.post(url, headers=headers, json=payload, stream=True, timeout=60)
-            if not response.ok:
-                print(f"[Erro ElevenLabs] Código: {response.status_code}")
-                print(f"Resposta: {response.text[:500]}")
-            response.raise_for_status()
-            return response.content
-        except requests.RequestException as e:
-            print(f"[Erro ElevenLabs] Tentativa {attempt + 1} falhou: {e}")
-            if attempt < retries - 1:
-                wait = 2 ** attempt
-                print(f"Aguardando {wait}s antes de tentar novamente...")
-                time.sleep(wait)
-            else:
-                raise RuntimeError("Falha ao gerar áudio com ElevenLabs após múltiplas tentativas.") from e
-    
+    try:
+        return enviar_requisicao(payload_com_style, tentativa_desc=" com style")
+    except RuntimeError:
+        print("[TTS] Falha com 'style'. Tentando novamente sem 'style'...")
+
+        # 2º tentativa sem 'style'
+        payload_sem_style = {
+            "text": text,
+            "voice_settings": {
+                "stability": 0.6,
+                "similarity_boost": 0.9
+            }
+        }
+
+        return enviar_requisicao(payload_sem_style, tentativa_desc=" sem style")
+
 def make_grain(size=(1280, 720), intensity=10):
     def make_frame(t):
         noise = np.random.randint(
