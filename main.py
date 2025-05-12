@@ -74,7 +74,9 @@ def format_ts(seconds):
     s = int(seconds % 60)
     return f"{h:02}:{m:02}:{s:02},{ms:03}"
 
-def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN"):
+import time  # já deve estar importado no topo, se não estiver, adicione
+
+def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN", retries=3):
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
     headers = {"xi-api-key": ELEVEN_API_KEY, "Content-Type": "application/json"}
     payload = {
@@ -87,9 +89,20 @@ def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN"):
             "use_speaker_boost": True
         }
     }
-    r = requests.post(url, headers=headers, json=payload, stream=True, timeout=60)
-    r.raise_for_status()
-    return r.content
+
+    for attempt in range(retries):
+        try:
+            response = requests.post(url, headers=headers, json=payload, stream=True, timeout=60)
+            response.raise_for_status()
+            return response.content
+        except requests.RequestException as e:
+            print(f"[Erro ElevenLabs] Tentativa {attempt + 1} falhou: {e}")
+            if attempt < retries - 1:
+                wait = 2 ** attempt
+                print(f"Aguardando {wait}s antes de tentar novamente...")
+                time.sleep(wait)
+            else:
+                raise RuntimeError("Falha ao gerar áudio com ElevenLabs após múltiplas tentativas.") from e
 
 def make_grain(size=(1280, 720), intensity=10):
     def make_frame(t):
