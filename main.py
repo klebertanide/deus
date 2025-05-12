@@ -327,6 +327,122 @@ def upload_zip():
         "pasta": str(output_dir)
     })
 
+import os, uuid, io, csv, re, zipfile
+import requests
+import unidecode
+import numpy as np
+from flask import Flask, request, jsonify, send_from_directory
+from pathlib import Path
+import openai
+from moviepy.editor import (
+    AudioFileClip, ImageClip, TextClip, CompositeVideoClip,
+    concatenate_videoclips, VideoFileClip
+)
+from moviepy.video.VideoClip import VideoClip
+from sentence_transformers import SentenceTransformer, util
+
+# Google Drive
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+
+app = Flask(__name__)
+
+# Pastas locais
+BASE = Path(".")
+AUDIO_DIR = BASE / "audio"
+CSV_DIR = BASE / "csv"
+FILES_DIR = BASE / "downloads"
+for d in [AUDIO_DIR, CSV_DIR, FILES_DIR]:
+    d.mkdir(parents=True, exist_ok=True)
+
+# Google Drive – pasta raiz
+GOOGLE_DRIVE_FOLDER_ID = "1d6RxnsYRS52oKUPGyuAfJZ00bksUUVI2"
+
+# Chaves
+ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+OPENAI_KEY = os.getenv("OPENAI_API_KEY")
+openai.api_key = OPENAI_KEY
+
+# Modelo CLIP para análise de similaridade entre prompt e imagem
+clip_model = SentenceTransformer("clip-ViT-B-32")
+
+def selecionar_imagem_mais_similar(prompt, imagens):
+    prompt_emb = clip_model.encode(prompt, convert_to_tensor=True)
+    melhor_score = -1
+    melhor_img = None
+    for img in imagens:
+        nome_limpo = re.sub(r"[^\w\s]", " ", img.stem)
+        nome_emb = clip_model.encode(nome_limpo, convert_to_tensor=True)
+        score = util.cos_sim(prompt_emb, nome_emb).item()
+        if score > melhor_score:
+            melhor_score = score
+            melhor_img = img
+    return melhor_img
+
+@app.route("/upload_zip", methods=["POST"])
+def upload_zip():
+    file = request.files.get("zip")
+    if not file:
+        return jsonify({"error": "Campo 'zip' obrigatório."}), 400
+
+    # Detectar slug automaticamente (única pasta existente ou mais recente)
+    pastas_existentes = sorted(FILES_DIR.glob("*/"), key=os.path.getmtime, reverse=True)
+    if not pastas_existentes:
+        return jsonify({"error": "Nenhuma pasta de projeto encontrada."}), 400
+
+    slug_path = pastas_existentes[0]
+    slug = slug_path.name.replace("_raw", "")
+    temp_dir = FILES_DIR / f"{slug}_raw"
+    output_dir = FILES_DIR / slug
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    zip_path = temp_dir / "imagens.zip"
+    file.save(zip_path)
+
+    # Extrair imagens
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        zip_ref.extractall(temp_dir)
+
+    imagens = [f for f in temp_dir.glob("*.*") if f.suffix.lower() in [".jpg", ".jpeg", ".png"]]
+    if not imagens:
+        return jsonify({"error": "Nenhuma imagem encontrada no ZIP."}), 400
+
+    # Localizar CSV
+    csv_path = CSV_DIR / f"{slug}.csv"
+    if not csv_path.exists():
+        return jsonify({"error": f"CSV '{csv_path.name}' não encontrado."}), 400
+
+    # Ler prompts do CSV
+    prompts = []
+    with open(csv_path, newline='', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            prompt = row["PROMPT"]
+            match = re.match(r"\d+ - .*?\. (.*)", prompt)
+            if match:
+                prompts.append(match.group(1))
+            else:
+                prompts.append(prompt)
+
+    # Selecionar imagens com base nos prompts
+    usadas = []
+    for i, prompt in enumerate(prompts):
+        img = selecionar_imagem_mais_similar(prompt, imagens)
+        if img:
+            destino = output_dir / f"{i:02d}_{img.name}"
+            img.rename(destino)
+            imagens.remove(img)
+            usadas.append(destino.name)
+
+    return jsonify({
+        "ok": True,
+        "slug": slug,
+        "total_prompts": len(prompts),
+        "total_imagens": len(usadas),
+        "usadas": usadas
+    })
 
 @app.route("/montar_video", methods=["POST"])
 def montar_video():
@@ -338,16 +454,14 @@ def montar_video():
     pasta_local = FILES_DIR / slug
     imagens = sorted([
         f for f in pasta_local.iterdir()
-        if f.suffix.lower() in ['.jpg', '.jpeg', '.png'] and "sobrepor" not in f.name and "fechamento" not in f.name
+        if f.suffix.lower() in ['.jpg', '.jpeg', '.png']
     ])
     if not imagens:
         return jsonify({"error": "Imagens não encontradas."}), 400
 
-    mp3_files = list(AUDIO_DIR.glob("*.mp3"))
-    if not mp3_files:
-        return jsonify({"error": "Nenhum arquivo MP3 encontrado na pasta /audio."}), 400
-
-    audio_path = mp3_files[0]  # Usa o primeiro arquivo encontrado
+    audio_path = AUDIO_DIR / f"{slug}.mp3"
+    if not audio_path.exists():
+        return jsonify({"error": "Áudio não encontrado."}), 400
 
     audio_clip = AudioFileClip(str(audio_path))
     clips = []
@@ -382,7 +496,7 @@ def montar_video():
     upload_arquivo_drive(output_path, "video_final.mp4", folder_id, drive)
 
     return jsonify({ "ok": True, "video": f"https://drive.google.com/drive/folders/{folder_id}" })
-    
+
 # Servir estáticos
 @app.route("/audio/<path:fn>")
 def servir_audio(fn): return send_from_directory(AUDIO_DIR,fn)
