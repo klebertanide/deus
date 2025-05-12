@@ -6,8 +6,8 @@ WORKDIR /app
 
 # Copia os arquivos do projeto
 COPY . /app
-COPY .well-known /app/.well-known
 COPY openapi.json /app/openapi.json
+COPY .well-known /app/.well-known
 
 # Instala dependências de sistema
 RUN apt-get update && apt-get install -y \
