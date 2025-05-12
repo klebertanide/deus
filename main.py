@@ -238,75 +238,126 @@ def gerar_csv():
 @app.route("/upload_zip", methods=["POST"])
 def upload_zip():
     file = request.files.get("zip")
-    slug = request.form.get("slug")
-    if not file or not slug:
-        return jsonify({"error":"zip e slug obrigatórios"}),400
+    if not file:
+        return jsonify({"error": "Campo 'zip' é obrigatório."}), 400
 
-    raw = FILES_DIR / f"{slug}_raw"
-    dst = FILES_DIR / slug
-    raw.mkdir(exist_ok=True); dst.mkdir(exist_ok=True)
+    # Detecta automaticamente o slug (pasta mais recente no FILES_DIR)
+    slugs = sorted(FILES_DIR.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
+    slug = slugs[0].name if slugs else "default"
 
-    zip_path = raw/"imagens.zip"
+    temp_dir = FILES_DIR / f"{slug}_raw"
+    output_dir = FILES_DIR / slug
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    zip_path = temp_dir / "imagens.zip"
     file.save(zip_path)
-    with zipfile.ZipFile(zip_path,"r") as z: z.extractall(raw)
 
-    imgs = sorted([p for p in raw.rglob("*") if p.suffix.lower() in [".jpg",".jpeg",".png"]], key=lambda p: p.name)
-    if not imgs:
-        return jsonify({"error":"nenhuma imagem"}),400
+    # Extrai o conteúdo do zip
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        zip_ref.extractall(temp_dir)
 
-    selected = imgs[:len(imgs)]  # ou imgs[:len(transcricao)] se souber o count
-    for img in selected:
-        img.rename(dst/img.name)
+    # Seleciona apenas imagens válidas
+    imagens = sorted([
+        f for f in temp_dir.glob("*") if f.suffix.lower() in [".jpg", ".jpeg", ".png"]
+    ])
 
-    return jsonify({"ok":True,"slug":slug,"path":str(dst),"usadas":[p.name for p in selected]})
+    if not imagens:
+        return jsonify({"error": "Nenhuma imagem encontrada no ZIP."}), 400
+
+    # Seleciona as primeiras 8 imagens ou todas
+    selecionadas = imagens[:8]
+    for img in selecionadas:
+        destino = output_dir / img.name
+        img.rename(destino)
+
+    return jsonify({
+        "ok": True,
+        "slug_usado": slug,
+        "total_encontradas": len(imagens),
+        "usadas": [f.name for f in selecionadas]
+    })
 
 @app.route("/montar_video", methods=["POST"])
 def montar_video():
-    data = request.get_json() or {}
-    path = data.get("path")
-    transcricao = data.get("transcricao",[])
-    folder_id = data.get("folder_id")
-    if not path or not transcricao or not folder_id:
-        return jsonify({"error":"path, transcricao e folder_id obrigatórios"}),400
+    # Detecta a pasta mais recente no FILES_DIR
+    pastas = sorted(FILES_DIR.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
+    slug = pastas[0].name if pastas else "default"
+    pasta_local = FILES_DIR / slug
 
-    pasta_local = Path(path)
-    imagens = sorted([p for p in pasta_local.iterdir() if p.suffix.lower() in [".jpg",".jpeg",".png"]])
-    if len(imagens) < len(transcricao):
-        return jsonify({"error":"imagens insuficientes"}),400
+    # Verifica se os arquivos necessários existem
+    mp3_path = AUDIO_DIR / f"{slug}.mp3"
+    srt_path = FILES_DIR / f"{slug}.srt"
+    txt_path = FILES_DIR / f"{slug}.txt"
+    csv_path = CSV_DIR / f"{slug}.csv"
+    if not mp3_path.exists():
+        return jsonify({"error": f"Áudio '{slug}.mp3' não encontrado."}), 400
+    if not srt_path.exists():
+        return jsonify({"error": "Legenda .srt não encontrada."}), 400
 
-    audio_path = AUDIO_DIR / f"{pasta_local.name}.mp3"
-    if not audio_path.exists():
-        return jsonify({"error":"áudio não encontrado"}),400
+    # Lê a transcrição do SRT
+    with open(srt_path, "r", encoding="utf-8") as f:
+        blocos = f.read().strip().split("\n\n")
+        transcricao = []
+        for bloco in blocos:
+            linhas = bloco.split("\n")
+            if len(linhas) >= 3:
+                tempo = linhas[1]
+                texto = " ".join(linhas[2:])
+                ini, fim = tempo.split(" --> ")
+                h, m, s = map(float, re.split("[:,]", ini.replace(",", ":")))
+                start = h * 3600 + m * 60 + s
+                h, m, s = map(float, re.split("[:,]", fim.replace(",", ":")))
+                end = h * 3600 + m * 60 + s
+                transcricao.append({"inicio": start, "fim": end, "texto": texto})
 
-    audio_clip = AudioFileClip(str(audio_path))
-    clips=[]
-    for i,seg in enumerate(transcricao):
-        dur = seg["fim"]-seg["inicio"]
-        txt = seg["texto"]
-        imgc = ImageClip(str(imagens[i%len(imagens)])).resize(height=720).crop(x_center="center",width=1280).set_duration(dur)
-        zoom = imgc.resize(lambda t:1+0.02*t)
-        legend = TextClip(txt.upper(),fontsize=60,font="DejaVu-Sans-Bold",
-                          color="white",stroke_color="black",stroke_width=2,
-                          size=(1280,None),method="caption"
-                         ).set_duration(dur).set_position(("center","bottom"))
-        grain = make_grain().set_opacity(0.05).set_duration(dur)
-        luz = VideoFileClip("sobrepor.mp4").resize((1280,720)).set_opacity(0.07).set_duration(dur)
-        marca = ImageClip("sobrepor.png").resize(height=100).set_position((20,20)).set_duration(dur)
-        comp = CompositeVideoClip([zoom,grain,luz,marca,legend],size=(1280,720))
+    imagens = sorted([
+        f for f in pasta_local.iterdir()
+        if f.suffix.lower() in ['.jpg', '.jpeg', '.png'] and "sobrepor" not in f.name and "fechamento" not in f.name
+    ])
+    if not imagens:
+        return jsonify({"error": "Nenhuma imagem encontrada na pasta."}), 400
+
+    audio_clip = AudioFileClip(str(mp3_path))
+    clips = []
+
+    for i, bloco in enumerate(transcricao):
+        tempo = bloco["fim"] - bloco["inicio"]
+        texto = bloco["texto"]
+        img = ImageClip(str(imagens[i % len(imagens)])).resize(height=720).crop(x_center='center', width=1280).set_duration(tempo)
+        zoom = img.resize(lambda t: 1 + 0.02 * t)
+
+        legenda = TextClip(texto.upper(), fontsize=60, font='DejaVu-Sans-Bold', color='white',
+                           stroke_color='black', stroke_width=2, size=(1280, None), method='caption'
+                          ).set_duration(tempo).set_position(('center', 'bottom'))
+
+        grain = make_grain().set_opacity(0.05).set_duration(tempo)
+        luz = VideoFileClip("sobrepor.mp4").resize((1280, 720)).set_opacity(0.07).set_duration(tempo)
+        marca = ImageClip("sobrepor.png").resize(height=100).set_position((20, 20)).set_opacity(1).set_duration(tempo)
+
+        comp = CompositeVideoClip([zoom, grain, luz, marca, legenda], size=(1280, 720))
         clips.append(comp)
 
-    enc_img=ImageClip("fechamento.png").resize(height=720).crop(x_center="center",width=1280).set_duration(3)
-    grain_f=make_grain().set_opacity(0.05).set_duration(3)
-    luz_f=VideoFileClip("sobrepor.mp4").resize((1280,720)).set_opacity(0.07).set_duration(3)
-    encerr = CompositeVideoClip([enc_img,grain_f,luz_f],size=(1280,720))
-    final = concatenate_videoclips(clips+[encerr]).set_audio(audio_clip)
-    out = FILES_DIR/f"{pasta_local.name}.mp4"
-    final.write_videofile(str(out),fps=24,codec="libx264",audio_codec="aac")
+    # Encerramento
+    encerramento_img = ImageClip("fechamento.png").resize(height=720).crop(x_center='center', width=1280).set_duration(3)
+    luz_final = VideoFileClip("sobrepor.mp4").resize((1280, 720)).set_opacity(0.07).set_duration(3)
+    grain_final = make_grain().set_opacity(0.05).set_duration(3)
+    encerramento = CompositeVideoClip([encerramento_img, grain_final, luz_final], size=(1280, 720))
 
+    final_video = concatenate_videoclips(clips + [encerramento]).set_audio(audio_clip)
+    output_path = FILES_DIR / f"{slug}.mp4"
+    final_video.write_videofile(str(output_path), fps=24, codec='libx264', audio_codec='aac')
+
+    # Upload automático para o Drive
     drive = get_drive_service()
-    upload_arquivo_drive(out,"video_final.mp4",folder_id,drive)
-    return jsonify({"ok":True,"video":f"https://drive.google.com/drive/folders/{folder_id}"})
+    pasta_id = criar_pasta_drive(slug, drive)
+    upload_arquivo_drive(output_path, "video_final.mp4", pasta_id, drive)
 
+    return jsonify({
+        "ok": True,
+        "video": f"https://drive.google.com/drive/folders/{pasta_id}"
+    })
+    
 # Servir estáticos
 @app.route("/audio/<path:fn>")
 def servir_audio(fn): return send_from_directory(AUDIO_DIR,fn)
