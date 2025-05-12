@@ -1,5 +1,6 @@
-import os, uuid, io, csv, zipfile
+import os, uuid, io, csv, zipfile, re
 import requests
+import unidecode
 from flask import Flask, request, jsonify, send_from_directory
 from pathlib import Path
 from openai import OpenAI
@@ -20,6 +21,13 @@ for d in [AUDIO_DIR, CSV_DIR, FILES_DIR]:
 ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY") or os.getenv("ELEVEN_API_KEY")
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 client = OpenAI(api_key=OPENAI_KEY)
+
+# ===== Função para criar slug do texto =====
+def slugify(texto, limite=30):
+    texto = unidecode.unidecode(texto)
+    texto = re.sub(r"[^\w\s]", "", texto)
+    texto = texto.strip().replace(" ", "_")
+    return texto[:limite].lower()
 
 # ===== ElevenLabs TTS =====
 def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN"):
@@ -47,7 +55,12 @@ def format_ts(seconds):
     s = int(seconds % 60)
     return f"{h:02}:{m:02}:{s:02},{ms:03}"
 
-# ===== Rotas principais =====
+# ===== Rota inicial de teste =====
+@app.route("/")
+def home():
+    return "API DeusTeEnviouIsso OK"
+
+# ===== Rota para gerar áudio =====
 @app.route("/falar", methods=["POST"])
 def falar():
     data = request.get_json(force=True, silent=True) or {}
@@ -55,16 +68,22 @@ def falar():
     if not texto:
         return jsonify({"error": "campo 'texto' obrigatório"}), 400
 
-    audio_bytes = elevenlabs_tts(texto)
-    filename = f"{uuid.uuid4()}.mp3"
+    slug = slugify(texto)
+    filename = f"{slug}.mp3"
     path = AUDIO_DIR / filename
+
+    audio_bytes = elevenlabs_tts(texto)
     with open(path, "wb") as f:
         f.write(audio_bytes)
 
     audio_url = request.url_root.rstrip('/') + '/audio/' + filename
-    return jsonify({"audio_url": audio_url})
+    return jsonify({
+        "audio_url": audio_url,
+        "filename": filename,
+        "slug": slug
+    })
 
-
+# ===== Rota para transcrever =====
 @app.route("/transcrever", methods=["POST"])
 def transcrever():
     data = request.get_json(force=True, silent=True) or {}
@@ -104,19 +123,20 @@ def transcrever():
         except:
             pass
 
-
+# ===== Rota para gerar arquivos finais =====
 @app.route("/gerar_csv", methods=["POST"])
 def gerar_csv():
     data = request.get_json(force=True, silent=True) or {}
     transcricao = data.get("transcricao")
     prompts = data.get("prompts", [])
     descricao = data.get("descricao", "Descrição não fornecida")
+    mp3_filename = data.get("mp3_filename")
+    slug = data.get("slug", str(uuid.uuid4()))  # se não vier, gera UUID
 
     if not transcricao or not prompts or len(transcricao) != len(prompts):
         return jsonify({"error": "É necessário fornecer listas 'transcricao' e 'prompts' com o mesmo tamanho."}), 400
 
-    uid = str(uuid.uuid4())
-    base_name = f"deus_{uid}"
+    base_name = f"deus_{slug}"
 
     # CSV
     csv_path = CSV_DIR / f"{base_name}.csv"
@@ -160,6 +180,11 @@ def gerar_csv():
         z.write(srt_path, arcname="legenda.srt")
         z.write(txt_path, arcname="descricao.txt")
 
+        if mp3_filename:
+            mp3_path = AUDIO_DIR / mp3_filename
+            if mp3_path.exists():
+                z.write(mp3_path, arcname="voz.mp3")
+
     base_url = request.url_root.rstrip("/")
     return jsonify({
         "csv_url": f"{base_url}/csv/{csv_path.name}",
@@ -167,7 +192,6 @@ def gerar_csv():
         "txt_url": f"{base_url}/downloads/{txt_path.name}",
         "zip_url": f"{base_url}/downloads/{zip_path.name}"
     })
-
 
 # ===== Arquivos públicos =====
 @app.route("/audio/<path:filename>")
