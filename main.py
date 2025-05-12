@@ -22,7 +22,7 @@ FILES_DIR = BASE / "downloads"
 for d in [AUDIO_DIR, CSV_DIR, FILES_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
-# Google Drive – pasta raiz (a que você compartilhou com a conta de serviço)
+# Google Drive – pasta raiz (ID da pasta compartilhada com a conta de serviço)
 GOOGLE_DRIVE_FOLDER_ID = "1d6RxnsYRS52oKUPGyuAfJZ00bksUUVI2"
 
 # Chaves
@@ -33,7 +33,7 @@ client = OpenAI(api_key=OPENAI_KEY)
 # Google Drive Auth
 def get_drive_service():
     creds = service_account.Credentials.from_service_account_file(
-        "service_account.json",
+        "/etc/secrets/service_account.json",
         scopes=["https://www.googleapis.com/auth/drive"]
     )
     return build("drive", "v3", credentials=creds)
