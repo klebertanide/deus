@@ -239,92 +239,123 @@ def gerar_csv():
 def upload_zip():
     file = request.files.get("zip")
     if not file:
-        return jsonify({"error": "Campo 'zip' é obrigatório."}), 400
+        return jsonify({"error": "Requer arquivo .zip com imagens."}), 400
 
-    # Detecta automaticamente o slug (pasta mais recente no FILES_DIR)
-    slugs = sorted(FILES_DIR.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
-    slug = slugs[0].name if slugs else "default"
+    # Localizar pasta de projeto automaticamente (única existente)
+    projetos = [p for p in FILES_DIR.iterdir() if p.is_dir() and p.name.endswith("_raw") is False]
+    if not projetos:
+        return jsonify({"error": "Nenhuma pasta de projeto encontrada."}), 400
+    if len(projetos) > 1:
+        return jsonify({"error": "Mais de uma pasta encontrada. Especifique manualmente."}), 400
 
+    pasta_projeto = projetos[0]
+    slug = pasta_projeto.name
     temp_dir = FILES_DIR / f"{slug}_raw"
     output_dir = FILES_DIR / slug
     temp_dir.mkdir(parents=True, exist_ok=True)
-    output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Salvar ZIP
     zip_path = temp_dir / "imagens.zip"
     file.save(zip_path)
 
-    # Extrai o conteúdo do zip
+    # Extrair ZIP
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
         zip_ref.extractall(temp_dir)
 
-    # Seleciona apenas imagens válidas
-    imagens = sorted([
-        f for f in temp_dir.glob("*") if f.suffix.lower() in [".jpg", ".jpeg", ".png"]
-    ])
-
-    if not imagens:
+    imagens_extraidas = list(temp_dir.glob("*.png")) + list(temp_dir.glob("*.jpg")) + list(temp_dir.glob("*.jpeg"))
+    if not imagens_extraidas:
         return jsonify({"error": "Nenhuma imagem encontrada no ZIP."}), 400
 
-    # Seleciona as primeiras 8 imagens ou todas
-    selecionadas = imagens[:8]
-    for img in selecionadas:
-        destino = output_dir / img.name
-        img.rename(destino)
+    # Ler prompts do CSV correspondente ao slug
+    csv_path = CSV_DIR / f"{slug}.csv"
+    if not csv_path.exists():
+        return jsonify({"error": "CSV não encontrado para este projeto."}), 400
+
+    prompts = []
+    with open(csv_path, newline='', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            prompt = row.get("PROMPT", "").split(". ")[-1].strip()
+            if prompt:
+                prompts.append(prompt)
+
+    # Importar CLIP somente aqui (para evitar overhead se não for usado)
+    import torch
+    from PIL import Image
+    from torchvision import transforms
+    from clip import load as load_clip
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model, preprocess = load_clip("ViT-B/32", device=device)
+
+    def embed_text(text):
+        with torch.no_grad():
+            return model.encode_text(clip.tokenize([text]).to(device)).float()
+
+    def embed_image(image_path):
+        with torch.no_grad():
+            image = preprocess(Image.open(image_path)).unsqueeze(0).to(device)
+            return model.encode_image(image).float()
+
+    imagens_usadas = []
+    for prompt in prompts:
+        embed_p = embed_text(prompt)
+        melhor_score = -1
+        melhor_img = None
+        for img_path in imagens_extraidas:
+            try:
+                embed_i = embed_image(img_path)
+                score = torch.cosine_similarity(embed_p, embed_i).item()
+                if score > melhor_score:
+                    melhor_score = score
+                    melhor_img = img_path
+            except:
+                continue
+
+        if melhor_img:
+            destino = output_dir / f"{len(imagens_usadas):02}.png"
+            melhor_img.rename(destino)
+            imagens_usadas.append(destino.name)
+
+    if not imagens_usadas:
+        return jsonify({"error": "Nenhuma imagem selecionada com base nos prompts."}), 500
 
     return jsonify({
         "ok": True,
-        "slug_usado": slug,
-        "total_encontradas": len(imagens),
-        "usadas": [f.name for f in selecionadas]
+        "slug": slug,
+        "selecionadas": imagens_usadas,
+        "pasta": str(output_dir)
     })
+
 
 @app.route("/montar_video", methods=["POST"])
 def montar_video():
-    # Detecta a pasta mais recente no FILES_DIR
-    pastas = sorted(FILES_DIR.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
-    slug = pastas[0].name if pastas else "default"
+    data = request.get_json(force=True)
+    slug = data.get("slug")
+    transcricao = data.get("transcricao")
+    folder_id = data.get("folder_id")
+
     pasta_local = FILES_DIR / slug
-
-    # Verifica se os arquivos necessários existem
-    mp3_path = AUDIO_DIR / f"{slug}.mp3"
-    srt_path = FILES_DIR / f"{slug}.srt"
-    txt_path = FILES_DIR / f"{slug}.txt"
-    csv_path = CSV_DIR / f"{slug}.csv"
-    if not mp3_path.exists():
-        return jsonify({"error": f"Áudio '{slug}.mp3' não encontrado."}), 400
-    if not srt_path.exists():
-        return jsonify({"error": "Legenda .srt não encontrada."}), 400
-
-    # Lê a transcrição do SRT
-    with open(srt_path, "r", encoding="utf-8") as f:
-        blocos = f.read().strip().split("\n\n")
-        transcricao = []
-        for bloco in blocos:
-            linhas = bloco.split("\n")
-            if len(linhas) >= 3:
-                tempo = linhas[1]
-                texto = " ".join(linhas[2:])
-                ini, fim = tempo.split(" --> ")
-                h, m, s = map(float, re.split("[:,]", ini.replace(",", ":")))
-                start = h * 3600 + m * 60 + s
-                h, m, s = map(float, re.split("[:,]", fim.replace(",", ":")))
-                end = h * 3600 + m * 60 + s
-                transcricao.append({"inicio": start, "fim": end, "texto": texto})
-
     imagens = sorted([
         f for f in pasta_local.iterdir()
         if f.suffix.lower() in ['.jpg', '.jpeg', '.png'] and "sobrepor" not in f.name and "fechamento" not in f.name
     ])
     if not imagens:
-        return jsonify({"error": "Nenhuma imagem encontrada na pasta."}), 400
+        return jsonify({"error": "Imagens não encontradas."}), 400
 
-    audio_clip = AudioFileClip(str(mp3_path))
+    mp3_files = list(AUDIO_DIR.glob("*.mp3"))
+    if not mp3_files:
+        return jsonify({"error": "Nenhum arquivo MP3 encontrado na pasta /audio."}), 400
+
+    audio_path = mp3_files[0]  # Usa o primeiro arquivo encontrado
+
+    audio_clip = AudioFileClip(str(audio_path))
     clips = []
 
     for i, bloco in enumerate(transcricao):
         tempo = bloco["fim"] - bloco["inicio"]
         texto = bloco["texto"]
-        img = ImageClip(str(imagens[i % len(imagens)])).resize(height=720).crop(x_center='center', width=1280).set_duration(tempo)
+        img = ImageClip(str(imagens[i])).resize(height=720).crop(x_center='center', width=1280).set_duration(tempo)
         zoom = img.resize(lambda t: 1 + 0.02 * t)
 
         legenda = TextClip(texto.upper(), fontsize=60, font='DejaVu-Sans-Bold', color='white',
@@ -338,7 +369,6 @@ def montar_video():
         comp = CompositeVideoClip([zoom, grain, luz, marca, legenda], size=(1280, 720))
         clips.append(comp)
 
-    # Encerramento
     encerramento_img = ImageClip("fechamento.png").resize(height=720).crop(x_center='center', width=1280).set_duration(3)
     luz_final = VideoFileClip("sobrepor.mp4").resize((1280, 720)).set_opacity(0.07).set_duration(3)
     grain_final = make_grain().set_opacity(0.05).set_duration(3)
@@ -348,15 +378,10 @@ def montar_video():
     output_path = FILES_DIR / f"{slug}.mp4"
     final_video.write_videofile(str(output_path), fps=24, codec='libx264', audio_codec='aac')
 
-    # Upload automático para o Drive
     drive = get_drive_service()
-    pasta_id = criar_pasta_drive(slug, drive)
-    upload_arquivo_drive(output_path, "video_final.mp4", pasta_id, drive)
+    upload_arquivo_drive(output_path, "video_final.mp4", folder_id, drive)
 
-    return jsonify({
-        "ok": True,
-        "video": f"https://drive.google.com/drive/folders/{pasta_id}"
-    })
+    return jsonify({ "ok": True, "video": f"https://drive.google.com/drive/folders/{folder_id}" })
     
 # Servir estáticos
 @app.route("/audio/<path:fn>")
