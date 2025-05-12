@@ -1,20 +1,20 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Brilho do Sol Nascente API",
+    "title": "API Deus Te Enviou Isso",
     "version": "1.0.0",
-    "description": "Gera áudios com ElevenLabs e transcreve com Whisper. Rotas: /falar e /transcrever."
+    "description": "API que converte texto em voz, gera transcrição, arquivos CSV/SRT/TXT e monta vídeos automáticos com imagens e narração."
   },
   "servers": [
     {
-      "url": "https://brilho-sol-nascente.onrender.com"
+      "url": "https://deus-w0i8.onrender.com"
     }
   ],
   "paths": {
     "/falar": {
       "post": {
-        "operationId": "gerar_audio",
-        "summary": "Gera áudio com voz Abujamra (ElevenLabs)",
+        "summary": "Gera áudio a partir de um texto",
+        "operationId": "falar",
         "requestBody": {
           "required": true,
           "content": {
@@ -24,40 +24,25 @@
                 "properties": {
                   "texto": {
                     "type": "string",
-                    "description": "Texto a ser transformado em áudio"
+                    "description": "Texto a ser convertido em áudio"
                   }
                 },
-                "required": [
-                  "texto"
-                ]
+                "required": ["texto"]
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Link público mp3",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "audio_url": {
-                      "type": "string",
-                      "format": "uri"
-                    }
-                  }
-                }
-              }
-            }
+            "description": "Áudio gerado com sucesso"
           }
         }
       }
     },
     "/transcrever": {
       "post": {
-        "operationId": "transcrever_audio",
-        "summary": "Transcreve áudio do Whisper e devolve blocos com início/fim",
+        "summary": "Transcreve um áudio MP3 para texto com marcações de tempo",
+        "operationId": "transcrever",
         "requestBody": {
           "required": true,
           "content": {
@@ -67,50 +52,17 @@
                 "properties": {
                   "audio_url": {
                     "type": "string",
-                    "format": "uri",
-                    "description": "URL do mp3 gerado pela rota /falar"
+                    "description": "URL do áudio gerado anteriormente"
                   }
                 },
-                "required": [
-                  "audio_url"
-                ]
+                "required": ["audio_url"]
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Transcrição estruturada",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "duracao_total": {
-                      "type": "number",
-                      "format": "float"
-                    },
-                    "transcricao": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "inicio": {
-                            "type": "number"
-                          },
-                          "fim": {
-                            "type": "number"
-                          },
-                          "texto": {
-                            "type": "string"
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
+            "description": "Transcrição retornada com sucesso"
           }
         }
       }
