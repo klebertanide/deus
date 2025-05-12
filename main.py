@@ -304,22 +304,35 @@ def gerar_csv():
 def upload_zip():
     file = request.files.get("zip")
     slug = request.form.get("slug")
+
     if not file or not slug:
         return jsonify({"error": "Requer 'zip' e 'slug'."}), 400
 
     temp_dir = FILES_DIR / slug
     temp_dir.mkdir(parents=True, exist_ok=True)
+
+    # Salva e descompacta o ZIP
     zip_path = temp_dir / "imagens.zip"
     file.save(zip_path)
 
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
         zip_ref.extractall(temp_dir)
 
-    imagens = sorted([f for f in temp_dir.iterdir() if f.suffix.lower() in ['.jpg', '.png']], key=lambda x: x.name)
+    # Busca imagens em qualquer subpasta
+    imagens = sorted([
+        p for p in temp_dir.rglob("*")
+        if p.suffix.lower() in ['.jpg', '.jpeg', '.png']
+    ], key=lambda x: x.name)
+
     if not imagens:
         return jsonify({"error": "Nenhuma imagem encontrada no ZIP."}), 400
 
-    return jsonify({"ok": True, "total_imagens": len(imagens), "path": str(temp_dir)})
+    return jsonify({
+        "ok": True,
+        "total_imagens": len(imagens),
+        "imagens": [str(p.name) for p in imagens],
+        "path": str(temp_dir)
+    })
 
 @app.route("/montar_video", methods=["POST"])
 def montar_video():
