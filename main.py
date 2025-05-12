@@ -81,11 +81,16 @@ def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN", retries=3):
     import time
 
     def enviar_requisicao(payload, tentativa_desc=""):
-        url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
-        headers = {
-            "xi-api-key": ELEVEN_API_KEY,
-            "Content-Type": "application/json"
-        }
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
+    headers = {
+        "xi-api-key": ELEVEN_API_KEY,
+        "Content-Type": "application/json"
+    }
+
+    print(f"\n[DEBUG] Iniciando requisição {tentativa_desc}")
+    print(f"[DEBUG] URL: {url}")
+    print(f"[DEBUG] HEADERS: {headers}")
+    print(f"[DEBUG] PAYLOAD: {payload}")
 
         for attempt in range(retries):
             try:
