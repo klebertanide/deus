@@ -161,9 +161,12 @@ def gerar_csv():
     if not transcricao or not prompts or len(transcricao) != len(prompts):
         return jsonify({"error": "É necessário fornecer listas 'transcricao' e 'prompts' com o mesmo tamanho."}), 400
 
-    mp3_path = AUDIO_DIR / mp3_filename if mp3_filename else None
-    if not mp3_path or not mp3_path.exists():
-        return jsonify({"error": f"Arquivo MP3 '{mp3_filename}' não encontrado no servidor."}), 400
+    if not mp3_filename:
+        return jsonify({"error": "Campo 'mp3_filename' é obrigatório."}), 400
+
+    mp3_path = AUDIO_DIR / mp3_filename
+    if not mp3_path.exists():
+        return jsonify({"error": f"O arquivo MP3 '{mp3_filename}' não foi encontrado em /audio."}), 400
 
     drive = get_drive_service()
     pasta_id = criar_pasta_drive(slug, drive)
@@ -202,7 +205,7 @@ def gerar_csv():
     with open(txt_path, "w", encoding="utf-8") as f:
         f.write(descricao.strip())
 
-    # Upload para o Google Drive
+    # Upload obrigatório do MP3
     upload_arquivo_drive(csv_path, "imagens.csv", pasta_id, drive)
     upload_arquivo_drive(srt_path, "legenda.srt", pasta_id, drive)
     upload_arquivo_drive(txt_path, "descricao.txt", pasta_id, drive)
