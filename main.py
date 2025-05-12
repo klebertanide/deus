@@ -1,9 +1,15 @@
-import os, uuid, io, csv, re
+import os, uuid, io, csv, re, zipfile
 import requests
 import unidecode
+import numpy as np
 from flask import Flask, request, jsonify, send_from_directory
 from pathlib import Path
 from openai import OpenAI
+from moviepy.editor import (
+    AudioFileClip, ImageClip, TextClip, CompositeVideoClip,
+    concatenate_videoclips, VideoFileClip
+)
+from moviepy.video.VideoClip import VideoClip
 
 # Google Drive
 from google.oauth2 import service_account
@@ -38,6 +44,7 @@ def get_drive_service():
 
 def slugify(texto, limite=30):
     texto = unidecode.unidecode(texto)
+    texto = re.sub(r"(?i)^deus\\s+", "", texto)
     texto = re.sub(r"[^\w\s]", "", texto)
     texto = texto.strip().replace(" ", "_")
     return texto[:limite].lower()
@@ -83,6 +90,18 @@ def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN"):
     r = requests.post(url, headers=headers, json=payload, stream=True, timeout=60)
     r.raise_for_status()
     return r.content
+
+def make_grain(size=(1280, 720), intensity=10):
+    def make_frame(t):
+        noise = np.random.randint(
+            low=128 - intensity,
+            high=128 + intensity,
+            size=(size[1], size[0], 1),
+            dtype=np.uint8
+        )
+        noise = np.repeat(noise, 3, axis=2)
+        return noise
+    return VideoClip(make_frame, duration=1).set_fps(24)
 
 @app.route("/")
 def home():
@@ -205,7 +224,7 @@ def gerar_csv():
     with open(txt_path, "w", encoding="utf-8") as f:
         f.write(descricao.strip())
 
-    # Upload obrigatório do MP3
+    # Upload obrigatório
     upload_arquivo_drive(csv_path, "imagens.csv", pasta_id, drive)
     upload_arquivo_drive(srt_path, "legenda.srt", pasta_id, drive)
     upload_arquivo_drive(txt_path, "descricao.txt", pasta_id, drive)
@@ -214,17 +233,76 @@ def gerar_csv():
     folder_url = f"https://drive.google.com/drive/folders/{pasta_id}"
     return jsonify({ "folder_url": folder_url })
 
-@app.route("/audio/<path:filename>")
-def baixar_audio(filename):
-    return send_from_directory(AUDIO_DIR, filename)
+@app.route("/upload_zip", methods=["POST"])
+def upload_zip():
+    file = request.files.get("zip")
+    slug = request.form.get("slug")
+    if not file or not slug:
+        return jsonify({"error": "Requer 'zip' e 'slug'."}), 400
 
-@app.route("/csv/<path:filename>")
-def baixar_csv(filename):
-    return send_from_directory(CSV_DIR, filename)
+    temp_dir = FILES_DIR / slug
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    zip_path = temp_dir / "imagens.zip"
+    file.save(zip_path)
 
-@app.route("/downloads/<path:filename>")
-def baixar_download(filename):
-    return send_from_directory(FILES_DIR, filename)
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        zip_ref.extractall(temp_dir)
+
+    imagens = sorted([f for f in temp_dir.iterdir() if f.suffix.lower() in ['.jpg', '.png']], key=lambda x: x.name)
+    if not imagens:
+        return jsonify({"error": "Nenhuma imagem encontrada no ZIP."}), 400
+
+    return jsonify({"ok": True, "total_imagens": len(imagens), "path": str(temp_dir)})
+
+@app.route("/montar_video", methods=["POST"])
+def montar_video():
+    data = request.get_json(force=True)
+    slug = data.get("slug")
+    transcricao = data.get("transcricao")
+    folder_id = data.get("folder_id")
+
+    pasta_local = FILES_DIR / slug
+    imagens = sorted([f for f in pasta_local.iterdir() if f.suffix.lower() in ['.jpg', '.png'] and "sobrepor" not in f.name and "fechamento" not in f.name])
+    if not imagens:
+        return jsonify({"error": "Imagens não encontradas."}), 400
+
+    audio_path = AUDIO_DIR / f"{slug}.mp3"
+    if not audio_path.exists():
+        return jsonify({"error": "Áudio não encontrado."}), 400
+
+    audio_clip = AudioFileClip(str(audio_path))
+    clips = []
+
+    for i, bloco in enumerate(transcricao):
+        tempo = bloco["fim"] - bloco["inicio"]
+        texto = bloco["texto"]
+        img = ImageClip(str(imagens[i])).resize(height=720).crop(x_center='center', width=1280).set_duration(tempo)
+        zoom = img.resize(lambda t: 1 + 0.02 * t)
+
+        legenda = TextClip(texto.upper(), fontsize=60, font='DejaVu-Sans-Bold', color='white',
+                           stroke_color='black', stroke_width=2, size=(1280, None), method='caption'
+                          ).set_duration(tempo).set_position(('center', 'bottom'))
+
+        grain = make_grain().set_opacity(0.05).set_duration(tempo)
+        luz = VideoFileClip("sobrepor.mp4").resize((1280, 720)).set_opacity(0.07).set_duration(tempo)
+        marca = ImageClip("sobrepor.png").resize(height=100).set_position((20, 20)).set_opacity(1).set_duration(tempo)
+
+        comp = CompositeVideoClip([zoom, grain, luz, marca, legenda], size=(1280, 720))
+        clips.append(comp)
+
+    encerramento_img = ImageClip("fechamento.png").resize(height=720).crop(x_center='center', width=1280).set_duration(3)
+    luz_final = VideoFileClip("sobrepor.mp4").resize((1280, 720)).set_opacity(0.07).set_duration(3)
+    grain_final = make_grain().set_opacity(0.05).set_duration(3)
+    encerramento = CompositeVideoClip([encerramento_img, grain_final, luz_final], size=(1280, 720))
+
+    final_video = concatenate_videoclips(clips + [encerramento]).set_audio(audio_clip)
+    output_path = FILES_DIR / f"{slug}.mp4"
+    final_video.write_videofile(str(output_path), fps=24, codec='libx264', audio_codec='aac')
+
+    drive = get_drive_service()
+    upload_arquivo_drive(output_path, "video_final.mp4", folder_id, drive)
+
+    return jsonify({ "ok": True, "video": f"https://drive.google.com/drive/folders/{folder_id}" })
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=True)
