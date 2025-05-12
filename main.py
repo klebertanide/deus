@@ -77,22 +77,30 @@ def format_ts(seconds):
 import time  # já deve estar importado no topo, se não estiver, adicione
 
 def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN", retries=3):
+    import time
+
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
-    headers = {"xi-api-key": ELEVEN_API_KEY, "Content-Type": "application/json"}
+    headers = {
+        "xi-api-key": ELEVEN_API_KEY,
+        "Content-Type": "application/json"
+    }
+
     payload = {
         "text": text,
         "model_id": "eleven_multilingual_v2",
         "voice_settings": {
-            "stability": 0.60,
-            "similarity_boost": 0.90,
-            "style": 0.15,
-            "use_speaker_boost": True
+            "stability": 0.6,
+            "similarity_boost": 0.9,
+             "style": 0.2
         }
     }
 
     for attempt in range(retries):
         try:
             response = requests.post(url, headers=headers, json=payload, stream=True, timeout=60)
+            if not response.ok:
+                print(f"[Erro ElevenLabs] Código: {response.status_code}")
+                print(f"Resposta: {response.text[:500]}")
             response.raise_for_status()
             return response.content
         except requests.RequestException as e:
@@ -103,7 +111,7 @@ def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN", retries=3):
                 time.sleep(wait)
             else:
                 raise RuntimeError("Falha ao gerar áudio com ElevenLabs após múltiplas tentativas.") from e
-
+    
 def make_grain(size=(1280, 720), intensity=10):
     def make_frame(t):
         noise = np.random.randint(
