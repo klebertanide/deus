@@ -6,7 +6,6 @@ WORKDIR /app
 
 # Copia os arquivos do projeto
 COPY . /app
-COPY openapi.json /app/openapi.json
 COPY .well-known /app/.well-known
 
 # Instala dependências de sistema
