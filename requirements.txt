@@ -1,6 +1,6 @@
 Flask
 openai>=1.0.0
-moviepy
+moviepy==1.0.3
 numpy
 unidecode
 requests
