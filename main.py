@@ -4,14 +4,12 @@ import unidecode
 from flask import Flask, request, jsonify, send_from_directory
 from pathlib import Path
 from openai import OpenAI
-from dotenv import load_dotenv
 
 # Google Drive
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-load_dotenv()
 app = Flask(__name__)
 
 # Pastas locais
@@ -22,11 +20,11 @@ FILES_DIR = BASE / "downloads"
 for d in [AUDIO_DIR, CSV_DIR, FILES_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
-# Google Drive – pasta raiz (ID da pasta compartilhada com a conta de serviço)
+# Google Drive – pasta raiz
 GOOGLE_DRIVE_FOLDER_ID = "1d6RxnsYRS52oKUPGyuAfJZ00bksUUVI2"
 
 # Chaves
-ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY") or os.getenv("ELEVEN_API_KEY")
+ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 client = OpenAI(api_key=OPENAI_KEY)
 
@@ -44,7 +42,6 @@ def slugify(texto, limite=30):
     texto = texto.strip().replace(" ", "_")
     return texto[:limite].lower()
 
-# Upload para subpasta no Drive
 def criar_pasta_drive(slug, drive):
     metadata = {
         "name": f"deus_{slug}",
@@ -63,7 +60,6 @@ def upload_arquivo_drive(filepath, filename, folder_id, drive):
     file = drive.files().create(body=file_metadata, media_body=media, fields="id").execute()
     return file.get("id")
 
-# Utilitário para legenda SRT
 def format_ts(seconds):
     ms = int((seconds % 1) * 1000)
     h = int(seconds // 3600)
@@ -71,7 +67,6 @@ def format_ts(seconds):
     s = int(seconds % 60)
     return f"{h:02}:{m:02}:{s:02},{ms:03}"
 
-# ElevenLabs TTS
 def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN"):
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
     headers = {"xi-api-key": ELEVEN_API_KEY, "Content-Type": "application/json"}
@@ -166,14 +161,16 @@ def gerar_csv():
     if not transcricao or not prompts or len(transcricao) != len(prompts):
         return jsonify({"error": "É necessário fornecer listas 'transcricao' e 'prompts' com o mesmo tamanho."}), 400
 
+    mp3_path = AUDIO_DIR / mp3_filename if mp3_filename else None
+    if not mp3_path or not mp3_path.exists():
+        return jsonify({"error": f"Arquivo MP3 '{mp3_filename}' não encontrado no servidor."}), 400
+
     drive = get_drive_service()
     pasta_id = criar_pasta_drive(slug, drive)
 
-    # Arquivos locais
     csv_path = CSV_DIR / f"{slug}.csv"
     srt_path = FILES_DIR / f"{slug}.srt"
     txt_path = FILES_DIR / f"{slug}.txt"
-    mp3_path = AUDIO_DIR / mp3_filename if mp3_filename else None
 
     # CSV
     header = [
@@ -188,8 +185,6 @@ def gerar_csv():
         for bloco, prompt in zip(transcricao, prompts):
             segundo = int(round(bloco.get("inicio", 0)))
             prompt_final = f'{segundo} - Painting style: Traditional watercolor, with soft brush strokes and handmade paper texture. {prompt}'
-            if "," in prompt_final:
-                prompt_final = f'{prompt_final}'
             writer.writerow([
                 prompt_final, "PRIVATE", "9:16", "ON", "3.0", "", "TURBO",
                 negative_prompt, "AUTO", ""
@@ -211,8 +206,7 @@ def gerar_csv():
     upload_arquivo_drive(csv_path, "imagens.csv", pasta_id, drive)
     upload_arquivo_drive(srt_path, "legenda.srt", pasta_id, drive)
     upload_arquivo_drive(txt_path, "descricao.txt", pasta_id, drive)
-    if mp3_path and mp3_path.exists():
-        upload_arquivo_drive(mp3_path, "voz.mp3", pasta_id, drive)
+    upload_arquivo_drive(mp3_path, "voz.mp3", pasta_id, drive)
 
     folder_url = f"https://drive.google.com/drive/folders/{pasta_id}"
     return jsonify({ "folder_url": folder_url })
