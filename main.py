@@ -446,9 +446,13 @@ def upload_zip():
 
 @app.route("/montar_video", methods=["POST"])
 def montar_video():
+    from difflib import SequenceMatcher
+
+    def similaridade(a, b):
+        return SequenceMatcher(None, a.lower(), b.lower()).ratio()
+
     data = request.get_json(force=True)
     slug = data.get("slug")
-    transcricao = data.get("transcricao")
     folder_id = data.get("folder_id")
 
     pasta_local = FILES_DIR / slug
@@ -457,11 +461,62 @@ def montar_video():
         if f.suffix.lower() in ['.jpg', '.jpeg', '.png']
     ])
     if not imagens:
-        return jsonify({"error": "Imagens não encontradas."}), 400
+        return jsonify({"error": "Nenhuma imagem encontrada."}), 400
 
-    audio_path = AUDIO_DIR / f"{slug}.mp3"
-    if not audio_path.exists():
-        return jsonify({"error": "Áudio não encontrado."}), 400
+    # Identifica automaticamente o único MP3 da pasta /audio
+    mp3s = list(AUDIO_DIR.glob("*.mp3"))
+    if not mp3s:
+        return jsonify({"error": "Nenhum arquivo de áudio encontrado."}), 400
+    audio_path = mp3s[0]
+
+    # Localiza o único CSV
+    csvs = list(CSV_DIR.glob("*.csv"))
+    if not csvs:
+        return jsonify({"error": "Nenhum arquivo CSV encontrado."}), 400
+    csv_path = csvs[0]
+
+    # Lê prompts do CSV
+    prompts = []
+    with open(csv_path, newline='', encoding="utf-8") as f:
+        reader = csv.reader(f)
+        next(reader)
+        for row in reader:
+            if row:
+                prompt = row[0].split(" - ", 1)[-1]
+                prompts.append(prompt)
+
+    # Associa a melhor imagem para cada prompt com base em similaridade
+    associadas = []
+    usadas = set()
+    for prompt in prompts:
+        melhor = max(
+            [img for img in imagens if img not in usadas],
+            key=lambda img: similaridade(prompt, img.stem),
+            default=None
+        )
+        if melhor:
+            associadas.append(melhor)
+            usadas.add(melhor)
+        else:
+            associadas.append(imagens[0])  # fallback
+
+    # Transcrição (mock ou baseada no slug se quiser automatizar mais ainda)
+    transcricao_path = FILES_DIR / f"{slug}.srt"
+    if not transcricao_path.exists():
+        return jsonify({"error": "Arquivo de legenda .srt não encontrado."}), 400
+
+    # Extrai transcrição da SRT
+    with open(transcricao_path, encoding="utf-8") as f:
+        blocos = f.read().strip().split("\n\n")
+        transcricao = []
+        for bloco in blocos:
+            partes = bloco.split("\n")
+            if len(partes) >= 3:
+                tempos = partes[1].split(" --> ")
+                inicio = sum(float(x) * 60**i for i, x in enumerate(reversed(tempos[0].replace(",", ".").split(":"))))
+                fim = sum(float(x) * 60**i for i, x in enumerate(reversed(tempos[1].replace(",", ".").split(":"))))
+                texto = " ".join(partes[2:])
+                transcricao.append({"inicio": inicio, "fim": fim, "texto": texto})
 
     audio_clip = AudioFileClip(str(audio_path))
     clips = []
@@ -469,7 +524,7 @@ def montar_video():
     for i, bloco in enumerate(transcricao):
         tempo = bloco["fim"] - bloco["inicio"]
         texto = bloco["texto"]
-        img = ImageClip(str(imagens[i])).resize(height=720).crop(x_center='center', width=1280).set_duration(tempo)
+        img = ImageClip(str(associadas[i % len(associadas)])).resize(height=720).crop(x_center='center', width=1280).set_duration(tempo)
         zoom = img.resize(lambda t: 1 + 0.02 * t)
 
         legenda = TextClip(texto.upper(), fontsize=60, font='DejaVu-Sans-Bold', color='white',
@@ -496,7 +551,7 @@ def montar_video():
     upload_arquivo_drive(output_path, "video_final.mp4", folder_id, drive)
 
     return jsonify({ "ok": True, "video": f"https://drive.google.com/drive/folders/{folder_id}" })
-
+    
 # Servir estáticos
 @app.route("/audio/<path:fn>")
 def servir_audio(fn): return send_from_directory(AUDIO_DIR,fn)
