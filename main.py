@@ -80,7 +80,7 @@ import time  # já deve estar importado no topo, se não estiver, adicione
 def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN", retries=3):
     import time
 
-    def enviar_requisicao(payload, tentativa_desc=""):
+def enviar_requisicao(payload, tentativa_desc=""):
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
     headers = {
         "xi-api-key": ELEVEN_API_KEY,
@@ -92,6 +92,21 @@ def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN", retries=3):
     print(f"[DEBUG] HEADERS: {headers}")
     print(f"[DEBUG] PAYLOAD: {payload}")
 
+    for attempt in range(retries):
+        try:
+            print(f"[TTS] Tentativa {attempt + 1}{tentativa_desc}...")
+            response = requests.post(url, headers=headers, json=payload, stream=True, timeout=60)
+            if not response.ok:
+                print(f"[Erro ElevenLabs] Código: {response.status_code}")
+                print(f"Resposta: {response.text[:300]}")
+            response.raise_for_status()
+            return response.content
+        except requests.RequestException as e:
+            print(f"[Erro ElevenLabs] {tentativa_desc} tentativa {attempt + 1} falhou: {e}")
+            if attempt < retries - 1:
+                time.sleep(2 ** attempt)
+            else:
+                raise RuntimeError(f"Falha ao gerar áudio com ElevenLabs após múltiplas tentativas ({tentativa_desc}).") from e
         for attempt in range(retries):
             try:
                 print(f"[TTS] Tentativa {attempt + 1}{tentativa_desc}...")
