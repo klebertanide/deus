@@ -10,6 +10,6 @@ google-auth-oauthlib
 google-auth-httplib2
 sentence-transformers
 Pillow==9.2.0
-torch==2.0.1
+torch>=2.0.0
 torchaudio==2.0.2
 clip @ git+https://github.com/openai/CLIP.git
