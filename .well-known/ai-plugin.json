@@ -1,11 +1,17 @@
 {
   "schema_version": "v1",
+  "name_for_model": "deus_te_enviou",
   "name_for_human": "DeusTeEnviouIsso",
-  "name_for_model": "deusteenviouisso",
-  "description_for_human": "Gera narração com ElevenLabs e monta vídeo.",
-  "description_for_model": "Use os endpoints /falar, /transcrever, /gerar_csv, /upload_zip e /montar_video",
-  "auth": { "type": "none" },
-  "api": { "type": "openapi", "url": "https://deus-w0i8.onrender.com/.well-known/openapi.json" },
-  "logo_url": "https://deus-w0i8.onrender.com/logo.png",
-  "contact_email": "you@example.com"
+  "description_for_model": "Cria vídeos automáticos com voz gerada por IA, transcrição, imagens, CSV, legenda e upload no Google Drive.",
+  "description_for_human": "Gere vídeos completos a partir de um texto curto. Receba áudio, legenda, imagens e vídeo final no seu Drive.",
+  "auth": {
+    "type": "none"
+  },
+  "api": {
+    "type": "openapi",
+    "url": "https://deus-w0i8.onrender.com/.well-known/openapi.json"
+  },
+  "logo_url": "https://deus-w0i8.onrender.com/static/logo.png",
+  "contact_email": "suporte@deusteenvio.com",
+  "legal_info_url": "https://deus-w0i8.onrender.com/termos"
 }
