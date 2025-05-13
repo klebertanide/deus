@@ -2,8 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "DeusTeEnviouIsso API",
-    "version": "1.0.0",
-    "description": "API que gera áudios, transcreve, cria CSV/SRT/TXT, faz upload de imagens ZIP e monta vídeos com base em contexto."
+    "version": "1.0.0"
   },
   "servers": [
     {
@@ -22,9 +21,7 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "texto": {
-                    "type": "string"
-                  }
+                  "texto": { "type": "string" }
                 },
                 "required": ["texto"]
               }
@@ -49,9 +46,7 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "audio_url": {
-                    "type": "string"
-                  }
+                  "audio_url": { "type": "string" }
                 },
                 "required": ["audio_url"]
               }
@@ -82,8 +77,8 @@
                       "type": "object",
                       "properties": {
                         "inicio": { "type": "number" },
-                        "fim": { "type": "number" },
-                        "texto": { "type": "string" }
+                        "fim":    { "type": "number" },
+                        "texto":  { "type": "string" }
                       },
                       "required": ["inicio", "fim", "texto"]
                     }
@@ -92,9 +87,9 @@
                     "type": "array",
                     "items": { "type": "string" }
                   },
-                  "descricao": {
-                    "type": "string"
-                  }
+                  "descricao":    { "type": "string" },
+                  "mp3_filename": { "type": "string" },
+                  "slug":         { "type": "string" }
                 },
                 "required": ["transcricao", "prompts", "descricao"]
               }
@@ -147,14 +142,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "folder_id": {
-                    "type": "string"
-                  },
-                  "slug": {
-                    "type": "string"
-                  }
+                  "slug":      { "type": "string" },
+                  "folder_id": { "type": "string" }
                 },
-                "required": ["folder_id", "slug"]
+                "required": ["folder_id"]
               }
             }
           }
