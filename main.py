@@ -191,29 +191,50 @@ def transcrever():
         return jsonify({"error": "campo 'audio_url' obrigatório"}), 400
 
     try:
+        # abre ou baixa o MP3
         if audio_url.startswith(request.url_root.rstrip("/")):
             fname = audio_url.rsplit("/audio/", 1)[-1]
-            p = AUDIO_DIR / fname
-            audio_file = open(p, "rb")
+            audio_file = open(AUDIO_DIR / fname, "rb")
         else:
             resp = requests.get(audio_url, timeout=60)
             resp.raise_for_status()
             audio_file = io.BytesIO(resp.content)
             audio_file.name = "audio.mp3"
 
-        transcript = openai.audio.transcriptions.create(
+        # 1) gerar SRT
+        srt_text = openai.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file,
-            response_format="verbose_json",
-            timestamp_granularities=["segment"]
+            response_format="srt"
         )
 
-        duration = transcript.duration
-        segments = [{"inicio": seg.start, "fim": seg.end, "texto": seg.text} for seg in transcript.segments]
-        return jsonify({"duracao_total": duration, "transcricao": segments})
+        # 2) converter timestamps
+        def parse_ts(ts):
+            h, m, rest = ts.split(":")
+            s, ms = rest.split(",")
+            return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
+
+        # 3) montar lista de segmentos
+        segments = []
+        for block in srt_text.strip().split("\n\n"):
+            lines = block.split("\n")
+            if len(lines) >= 3:
+                start_str, end_str = lines[1].split(" --> ")
+                text = " ".join(lines[2:])
+                segments.append({
+                    "inicio": parse_ts(start_str),
+                    "fim":   parse_ts(end_str),
+                    "texto": text
+                })
+
+        return jsonify({
+            "duracao_total": segments[-1]["fim"],
+            "transcricao": segments
+        })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
     finally:
         try:
             audio_file.close()
@@ -228,15 +249,15 @@ def gerar_csv():
     transcricao = data.get("transcricao", [])
     prompts = data.get("prompts", [])
     descricao = data.get("descricao", "")
-    mp3_filename = data.get("mp3_filename")  # Pode ser omitido
-
-    # Detectar automaticamente se não for fornecido
-    if not mp3_filename:
-        mp3s = list(AUDIO_DIR.glob("*.mp3"))
-        if len(mp3s) == 1:
-            mp3_filename = mp3s[0].name
-        else:
-            return jsonify({"error": "campo 'mp3_filename' obrigatório ou múltiplos .mp3 encontrados"}), 400
+   mp3_filename = data.get("mp3_filename")
+if not mp3_filename:
+    mp3s = list(AUDIO_DIR.glob("*.mp3"))
+    if len(mp3s) == 1:
+        mp3_filename = mp3s[0].name
+    elif len(mp3s) == 0:
+        return jsonify({"error": "Nenhum arquivo .mp3 encontrado na pasta."}), 400
+    else:
+        return jsonify({"error": "Vários arquivos .mp3 encontrados. Informe qual usar com 'mp3_filename'."}), 400
 
     slug = data.get("slug", Path(mp3_filename).stem)
 
