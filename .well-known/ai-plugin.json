@@ -1,18 +1,18 @@
 {
   "schema_version": "v1",
-  "name_for_model": "deus_te_enviou_isso",
-  "name_for_human": "Deus Te Enviou Isso",
-  "description_for_model": "Gera áudios com voz narrada, transcreve, gera arquivos de legenda, prompts e monta vídeos com base em imagens e texto narrado.",
-  "description_for_human": "Gera vídeos automáticos com imagens e narração a partir de texto. Ideal para conteúdos rápidos, poéticos ou impactantes.",
+  "name_for_human": "DeusTeEnviouIsso",
+  "name_for_model": "deusteenvioisso",
+  "description_for_human": "Cria vídeos automáticos a partir de textos com narração e imagens sincronizadas.",
+  "description_for_model": "Use esta API para transformar textos em vídeos com narração, imagens e transcrição sincronizada.",
   "auth": {
     "type": "none"
   },
   "api": {
     "type": "openapi",
-    "url": "https://deus-w0i8.onrender.com/openapi.json",
-    "has_user_authentication": false
+    "url": "https://deus-w0i8.onrender.com/.well-known/openapi.json",
+    "is_user_authenticated": false
   },
-  "logo_url": "https://deus-w0i8.onrender.com/downloads/logo.png",
-  "contact_email": "contato@seusite.com",
-  "legal_info_url": "https://seusite.com/termos"
+  "logo_url": "https://deus-w0i8.onrender.com/logo.png",
+  "contact_email": "seuemail@dominio.com",
+  "legal_info_url": "https://seusite.com/legal"
 }
