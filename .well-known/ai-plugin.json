@@ -1,18 +1,11 @@
 {
   "schema_version": "v1",
   "name_for_human": "DeusTeEnviouIsso",
-  "name_for_model": "deusteenvioisso",
-  "description_for_human": "Cria vídeos automáticos a partir de textos com narração e imagens sincronizadas.",
-  "description_for_model": "Use esta API para transformar textos em vídeos com narração, imagens e transcrição sincronizada.",
-  "auth": {
-    "type": "none"
-  },
-  "api": {
-    "type": "openapi",
-    "url": "https://deus-w0i8.onrender.com/.well-known/openapi.json",
-    "is_user_authenticated": false
-  },
+  "name_for_model": "deusteenviouisso",
+  "description_for_human": "Gera narração com ElevenLabs e monta vídeo.",
+  "description_for_model": "Use os endpoints /falar, /transcrever, /gerar_csv, /upload_zip e /montar_video",
+  "auth": { "type": "none" },
+  "api": { "type": "openapi", "url": "https://deus-w0i8.onrender.com/.well-known/openapi.json" },
   "logo_url": "https://deus-w0i8.onrender.com/logo.png",
-  "contact_email": "seuemail@dominio.com",
-  "legal_info_url": "https://seusite.com/legal"
+  "contact_email": "you@example.com"
 }
