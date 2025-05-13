@@ -221,21 +221,24 @@ def transcrever():
             pass
 
 # Bloco 8 - Endpoint /gerar_csv
+
 @app.route("/gerar_csv", methods=["POST"])
 def gerar_csv():
     data = request.get_json() or {}
     transcricao = data.get("transcricao", [])
     prompts = data.get("prompts", [])
     descricao = data.get("descricao", "")
-    mp3_filename = data.get("mp3_filename")
-    slug = data.get("slug", str(uuid.uuid4()))
+    mp3_filename = data.get("mp3_filename")  # Pode ser omitido
 
+    # Detectar automaticamente se não for fornecido
     if not mp3_filename:
         mp3s = list(AUDIO_DIR.glob("*.mp3"))
         if len(mp3s) == 1:
             mp3_filename = mp3s[0].name
         else:
             return jsonify({"error": "campo 'mp3_filename' obrigatório ou múltiplos .mp3 encontrados"}), 400
+
+    slug = data.get("slug", Path(mp3_filename).stem)
 
     if not transcricao or not prompts or len(transcricao) != len(prompts):
         return jsonify({"error": "transcricao+prompts inválidos"}), 400
@@ -251,10 +254,10 @@ def gerar_csv():
     srt_path = FILES_DIR / f"{slug}.srt"
     txt_path = FILES_DIR / f"{slug}.txt"
 
+    # CSV
     header = ["PROMPT", "VISIBILITY", "ASPECT_RATIO", "MAGIC_PROMPT", "MODEL",
               "SEED_NUMBER", "RENDERING", "NEGATIVE_PROMPT", "STYLE", "COLOR_PALETTE"]
     neg = "low quality, overexposed, underexposed, extra limbs, extra fingers, missing fingers, disfigured, deformed, bad anatomy"
-
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(header)
@@ -263,13 +266,16 @@ def gerar_csv():
             pf = f"{sec} - Painting style: Traditional watercolor, with soft brush strokes and handmade paper texture. {prompt}"
             w.writerow([pf, "PRIVATE", "9:16", "ON", "3.0", "", "TURBO", neg, "AUTO", ""])
 
+    # SRT
     with open(srt_path, "w", encoding="utf-8") as s:
         for i, seg in enumerate(transcricao, 1):
             s.write(f"{i}\n{format_ts(seg['inicio'])} --> {format_ts(seg['fim'])}\n{seg['texto'].strip()}\n\n")
 
+    # TXT
     with open(txt_path, "w", encoding="utf-8") as t:
         t.write(descricao.strip())
 
+    # Uploads
     upload_arquivo_drive(csv_path, "imagens.csv", pasta_id, drive)
     upload_arquivo_drive(srt_path, "legenda.srt", pasta_id, drive)
     upload_arquivo_drive(txt_path, "descricao.txt", pasta_id, drive)
