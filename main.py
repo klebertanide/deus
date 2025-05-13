@@ -185,36 +185,36 @@ def falar():
 # Bloco 7 - Endpoint /transcrever
 @app.route("/transcrever", methods=["POST"])
 def transcrever():
-    data = request.get_json() or {}
+    data      = request.get_json() or {}
     audio_url = data.get("audio_url")
     if not audio_url:
         return jsonify({"error": "campo 'audio_url' obrigatório"}), 400
 
     try:
-        # abre ou baixa o MP3
+        # abre local ou baixa remoto
         if audio_url.startswith(request.url_root.rstrip("/")):
-            fname = audio_url.rsplit("/audio/", 1)[-1]
+            fname      = audio_url.rsplit("/audio/", 1)[-1]
             audio_file = open(AUDIO_DIR / fname, "rb")
         else:
-            resp = requests.get(audio_url, timeout=60)
+            resp       = requests.get(audio_url, timeout=60)
             resp.raise_for_status()
             audio_file = io.BytesIO(resp.content)
             audio_file.name = "audio.mp3"
 
-        # 1) gerar SRT
+        # 1) Gera SRT
         srt_text = openai.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file,
             response_format="srt"
         )
 
-        # 2) converter timestamps
+        # 2) Função de parsing
         def parse_ts(ts):
             h, m, rest = ts.split(":")
-            s, ms = rest.split(",")
-            return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
+            s, ms      = rest.split(",")
+            return int(h)*3600 + int(m)*60 + int(s) + int(ms)/1000
 
-        # 3) montar lista de segmentos
+        # 3) Monta lista de blocos
         segments = []
         for block in srt_text.strip().split("\n\n"):
             lines = block.split("\n")
@@ -223,43 +223,46 @@ def transcrever():
                 text = " ".join(lines[2:])
                 segments.append({
                     "inicio": parse_ts(start_str),
-                    "fim":   parse_ts(end_str),
-                    "texto": text
+                    "fim":    parse_ts(end_str),
+                    "texto":  text
                 })
 
         return jsonify({
             "duracao_total": segments[-1]["fim"],
-            "transcricao": segments
+            "transcricao":   segments
         })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
     finally:
-        try:
-            audio_file.close()
-        except:
-            pass
+        try: audio_file.close()
+        except: pass
 
 # Bloco 8 - Endpoint /gerar_csv
 
 @app.route("/gerar_csv", methods=["POST"])
 def gerar_csv():
     data = request.get_json() or {}
-    transcricao = data.get("transcricao", [])
-    prompts = data.get("prompts", [])
-    descricao = data.get("descricao", "")
-   mp3_filename = data.get("mp3_filename")
-if not mp3_filename:
-    mp3s = list(AUDIO_DIR.glob("*.mp3"))
-    if len(mp3s) == 1:
-        mp3_filename = mp3s[0].name
-    elif len(mp3s) == 0:
-        return jsonify({"error": "Nenhum arquivo .mp3 encontrado na pasta."}), 400
-    else:
-        return jsonify({"error": "Vários arquivos .mp3 encontrados. Informe qual usar com 'mp3_filename'."}), 400
+    transcricao   = data.get("transcricao", [])
+    prompts       = data.get("prompts", [])
+    descricao     = data.get("descricao", "")
+    mp3_filename  = data.get("mp3_filename")  # ← indentado corretamente
 
-    slug = data.get("slug", Path(mp3_filename).stem)
+    # se não foi passado, detecta o único .mp3 na pasta
+    if not mp3_filename:
+        mp3s = list(AUDIO_DIR.glob("*.mp3"))
+        if len(mp3s) == 1:
+            mp3_filename = mp3s[0].name
+        elif len(mp3s) == 0:
+            return jsonify({"error": "Nenhum arquivo .mp3 encontrado na pasta."}), 400
+        else:
+            return jsonify({
+                "error": "Múltiplos arquivos .mp3 encontrados. "
+                         "Informe qual usar via 'mp3_filename' ou remova os extras."
+            }), 400
+
+    slug     = data.get("slug", Path(mp3_filename).stem)
 
     if not transcricao or not prompts or len(transcricao) != len(prompts):
         return jsonify({"error": "transcricao+prompts inválidos"}), 400
@@ -268,12 +271,13 @@ if not mp3_filename:
     if not mp3_path.exists():
         return jsonify({"error": "MP3 não encontrado"}), 400
 
-    drive = get_drive_service()
+    drive    = get_drive_service()
     pasta_id = criar_pasta_drive(slug, drive)
 
     csv_path = CSV_DIR / f"{slug}.csv"
     srt_path = FILES_DIR / f"{slug}.srt"
     txt_path = FILES_DIR / f"{slug}.txt"
+
 
     # CSV
     header = ["PROMPT", "VISIBILITY", "ASPECT_RATIO", "MAGIC_PROMPT", "MODEL",
@@ -305,34 +309,64 @@ if not mp3_filename:
     return jsonify({"folder_url": f"https://drive.google.com/drive/folders/{pasta_id}"})
 
 # Bloco 9 - Upload ZIP e Seleção de Imagens
-"/upload_zip": {
-  "post": {
-    "summary": "Faz upload de imagens .zip e associa automaticamente",
-    "operationId": "uploadZip",
-    "requestBody": {
-      "required": true,
-      "content": {
-        "multipart/form-data": {
-          "schema": {
-            "type": "object",
-            "properties": {
-              "zip": {
-                "type": "string",
-                "format": "binary"
-              }
-            },
-            "required": ["zip"]
-          }
-        }
-      }
-    },
-    "responses": {
-      "200": {
-        "description": "Imagens processadas e selecionadas"
-      }
-    }
-  }
-}
+@app.route("/upload_zip", methods=["POST"])
+def upload_zip():
+    file = request.files.get("zip")
+    if not file:
+        return jsonify({"error": "Campo 'zip' obrigatório."}), 400
+
+    # detecta automaticamente a pasta de projeto existente (única)
+    projetos = [p for p in FILES_DIR.iterdir() if p.is_dir() and not p.name.endswith("_raw")]
+    if len(projetos) == 0:
+        return jsonify({"error": "Nenhuma pasta de projeto encontrada."}), 400
+    if len(projetos) > 1:
+        return jsonify({"error": "Mais de uma pasta encontrada. Especifique manualmente."}), 400
+
+    slug       = projetos[0].name
+    temp_dir   = FILES_DIR / f"{slug}_raw"
+    output_dir = FILES_DIR / slug
+    temp_dir.mkdir(exist_ok=True)
+    output_dir.mkdir(exist_ok=True)
+
+    zip_path = temp_dir / "imagens.zip"
+    file.save(zip_path)
+
+    with zipfile.ZipFile(zip_path, 'r') as z:
+        z.extractall(temp_dir)
+
+    imagens = [f for f in temp_dir.glob("*.*") if f.suffix.lower() in [".jpg","jpeg",".png"]]
+    if not imagens:
+        return jsonify({"error": "Nenhuma imagem encontrada no ZIP."}), 400
+
+    # lê prompts do CSV do mesmo slug
+    csv_path = CSV_DIR / f"{slug}.csv"
+    if not csv_path.exists():
+        return jsonify({"error": "CSV não encontrado para este projeto."}), 400
+
+    prompts = []
+    with open(csv_path, newline='', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            # extrai texto puro depois do prefixo "<n> - "
+            prompts.append(row["PROMPT"].split(" - ",1)[-1].strip())
+
+    # seleciona a melhor imagem para cada prompt...
+    usadas = []
+    for i, prompt in enumerate(prompts):
+        melhor = selecionar_imagem_mais_similar(prompt, imagens)
+        if melhor:
+            destino = output_dir / f"{i:02d}_{melhor.name}"
+            melhor.rename(destino)
+            imagens.remove(melhor)
+            usadas.append(destino.name)
+
+    return jsonify({
+        "ok": True,
+        "slug": slug,
+        "total_prompts": len(prompts),
+        "total_imagens": len(usadas),
+        "usadas": usadas
+    })
 
 # Bloco 10 - Montagem de Vídeo e Encerramento
 @app.route("/montar_video", methods=["POST"])
