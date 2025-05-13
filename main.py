@@ -17,7 +17,7 @@ from moviepy.editor import (
     concatenate_videoclips, VideoFileClip
 )
 from moviepy.video.VideoClip import VideoClip
-from sentence_transformers import SentenceTransformer, util
+# from sentence_transformers import SentenceTransformer, util
 
 # Google Drive
 from google.oauth2 import service_account
@@ -43,7 +43,7 @@ OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 openai.api_key = OPENAI_KEY
 
 # Modelo CLIP
-clip_model = SentenceTransformer("clip-ViT-B-32")
+# clip_model = SentenceTransformer("clip-ViT-B-32")
 
 # Bloco 2
 
