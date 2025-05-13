@@ -1,4 +1,3 @@
-# Bloco 1 - Imports e Configurações Iniciais
 import os
 import uuid
 import io
@@ -23,6 +22,7 @@ from googleapiclient.http import MediaFileUpload
 
 app = Flask(__name__)
 
+# Pastas locais
 BASE = Path(".")
 AUDIO_DIR = BASE / "audio"
 CSV_DIR = BASE / "csv"
@@ -30,12 +30,13 @@ FILES_DIR = BASE / "downloads"
 for d in [AUDIO_DIR, CSV_DIR, FILES_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
+# Configurações
 GOOGLE_DRIVE_FOLDER_ID = "1d6RxnsYRS52oKUPGyuAfJZ00bksUUVI2"
 ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 openai.api_key = OPENAI_KEY
 
-# Bloco 2 - Utilitários de Drive e Texto
+# ---------- Bloco 1: Utilitários ----------
 
 def get_drive_service():
     creds = service_account.Credentials.from_service_account_file(
@@ -46,30 +47,25 @@ def get_drive_service():
 
 def slugify(texto, limite=30):
     texto = unidecode.unidecode(texto)
-    texto = re.sub(r"(?i)^deus\\s+", "", texto)
+    texto = re.sub(r"(?i)^deus\s+", "", texto)
     texto = re.sub(r"[^\w\s]", "", texto)
     texto = texto.strip().replace(" ", "_")
     return texto[:limite].lower()
 
 def criar_pasta_drive(slug, drive):
-    metadata = {
+    meta = {
         "name": f"deus_{slug}",
         "mimeType": "application/vnd.google-apps.folder",
         "parents": [GOOGLE_DRIVE_FOLDER_ID]
     }
-    pasta = drive.files().create(body=metadata, fields="id").execute()
+    pasta = drive.files().create(body=meta, fields="id").execute()
     return pasta.get("id")
 
 def upload_arquivo_drive(filepath, filename, folder_id, drive):
-    file_metadata = {
-        "name": filename,
-        "parents": [folder_id]
-    }
+    meta = {"name": filename, "parents": [folder_id]}
     media = MediaFileUpload(str(filepath), resumable=True)
-    file = drive.files().create(body=file_metadata, media_body=media, fields="id").execute()
+    file = drive.files().create(body=meta, media_body=media, fields="id").execute()
     return file.get("id")
-
-# Bloco 3 - Utilidades Visuais e Similaridade
 
 def format_ts(seconds):
     ms = int((seconds % 1) * 1000)
@@ -80,7 +76,7 @@ def format_ts(seconds):
 
 def make_grain(size=(1280, 720), intensity=10):
     def frame(t):
-        noise = np.random.randint(128-intensity, 128+intensity, (size[1], size[0], 1), dtype=np.uint8)
+        noise = np.random.randint(128-intensity, 128+intensity, (size[1], size[0], 1), np.uint8)
         noise = np.repeat(noise, 3, axis=2)
         return noise
     return VideoClip(frame, duration=1).set_fps(24)
@@ -88,393 +84,262 @@ def make_grain(size=(1280, 720), intensity=10):
 def selecionar_imagem_mais_similar(prompt, imagens):
     import re
     from sentence_transformers import SentenceTransformer, util
-
     model = SentenceTransformer("clip-ViT-B-32")
-    prompt_emb = model.encode(prompt, convert_to_tensor=True)
-
-    melhor_score = -1
-    melhor_img = None
-
+    p_emb = model.encode(prompt, convert_to_tensor=True)
+    melhor, best_score = None, -1
     for img in imagens:
-        nome_limpo = re.sub(r"[^\w\s]", " ", img.stem)
-        nome_emb = model.encode(nome_limpo, convert_to_tensor=True)
-        score = util.cos_sim(prompt_emb, nome_emb).item()
+        nome = re.sub(r"[^\w\s]", " ", img.stem)
+        i_emb = model.encode(nome, convert_to_tensor=True)
+        score = util.cos_sim(p_emb, i_emb).item()
+        if score > best_score:
+            best_score, melhor = score, img
+    return melhor
 
-        if score > melhor_score:
-            melhor_score = score
-            melhor_img = img
-
-    return melhor_img
-
-# Bloco 4 - Geração de Áudio
+# ---------- Bloco 2: ElevenLabs TTS ----------
 
 def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN", retries=3):
-    def enviar_requisicao(payload, desc):
+    def enviar(payload, desc):
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
         headers = {"xi-api-key": ELEVEN_API_KEY, "Content-Type": "application/json"}
-        for attempt in range(retries):
+        for i in range(retries):
             try:
-                response = requests.post(url, headers=headers, json=payload, stream=True, timeout=60)
-                if not response.ok:
-                    print(f"[Erro ElevenLabs] {desc} status {response.status_code}")
-                response.raise_for_status()
-                return response.content
-            except requests.RequestException as e:
-                if attempt < retries - 1:
-                    time.sleep(2 ** attempt)
-                else:
-                    raise RuntimeError(f"Falha ElevenLabs ({desc})") from e
-
-    p1 = {"text": text, "voice_settings": {"stability": 0.6, "similarity_boost": 0.9, "style": 0.2}}
+                resp = requests.post(url, headers=headers, json=payload, stream=True, timeout=60)
+                resp.raise_for_status()
+                return resp.content
+            except Exception:
+                if i < retries-1: time.sleep(2**i)
+                else: raise
+    # tentativa com style
+    p1 = {"text": text, "voice_settings": {"stability":0.6,"similarity_boost":0.9,"style":0.2}}
     try:
-        audio = enviar_requisicao(p1, "com style")
-        if not isinstance(audio, (bytes, bytearray)) or not audio:
-            raise ValueError("Resposta vazia")
-        return audio
-    except Exception:
-        p2 = {"text": text, "voice_settings": {"stability": 0.6, "similarity_boost": 0.9}}
-        audio = enviar_requisicao(p2, "sem style")
-        if not isinstance(audio, (bytes, bytearray)) or not audio:
-            raise ValueError("Resposta vazia")
-        return audio
+        audio = enviar(p1, "style")
+        if audio: return audio
+    except: pass
+    p2 = {"text": text, "voice_settings": {"stability":0.6,"similarity_boost":0.9}}
+    return enviar(p2, "no-style")
 
-# Bloco 5 - Endpoints Básicos
+# ---------- Bloco 3: Endpoints básicos ----------
 
 @app.route("/")
-def home():
-    return "API DeusTeEnviouIsso OK"
+def home(): return "API OK"
 
 @app.route("/audio/<path:fn>")
-def servir_audio(fn):
-    return send_from_directory(AUDIO_DIR, fn)
+def servir_audio(fn): return send_from_directory(AUDIO_DIR, fn)
 
 @app.route("/csv/<path:fn>")
-def servir_csv(fn):
-    return send_from_directory(CSV_DIR, fn)
+def servir_csv(fn): return send_from_directory(CSV_DIR, fn)
 
 @app.route("/downloads/<path:fn>")
-def servir_down(fn):
-    return send_from_directory(FILES_DIR, fn)
+def servir_down(fn): return send_from_directory(FILES_DIR, fn)
 
-# Bloco 6 - Endpoint /falar
+# ---------- Bloco 4: /falar ----------
+
 @app.route("/falar", methods=["POST"])
 def falar():
     data = request.get_json() or {}
     texto = data.get("texto")
-    if not texto:
-        return jsonify({"error": "campo 'texto' obrigatório"}), 400
-
+    if not texto: return jsonify({"error":"campo 'texto' obrigatório"}),400
     slug = slugify(texto)
     filename = f"{slug}.mp3"
-    path = AUDIO_DIR / filename
-
+    path = AUDIO_DIR/filename
     try:
-        audio_bytes = elevenlabs_tts(texto)
+        audio = elevenlabs_tts(texto)
+        with open(path,"wb") as f: f.write(audio)
     except Exception as e:
-        return jsonify({"error": "falha ElevenLabs", "detalhe": str(e)}), 500
-
-    with open(path, "wb") as f:
-        f.write(audio_bytes)
-
+        return jsonify({"error":"falha TTS","detalhe":str(e)}),500
     return jsonify({
-        "audio_url": request.url_root.rstrip("/") + f"/audio/{filename}",
+        "audio_url": f"{request.url_root}audio/{filename}",
         "filename": filename,
         "slug": slug
     })
 
-# Bloco 7 - Endpoint /transcrever
+# ---------- Bloco 5: /transcrever ----------
+
 @app.route("/transcrever", methods=["POST"])
 def transcrever():
-    data      = request.get_json() or {}
-    audio_url = data.get("audio_url")
-    if not audio_url:
-        return jsonify({"error": "campo 'audio_url' obrigatório"}), 400
-
+    data = request.get_json() or {}
+    url = data.get("audio_url")
+    if not url: return jsonify({"error":"campo 'audio_url' obrigatório"}),400
     try:
-        # abre local ou baixa remoto
-        if audio_url.startswith(request.url_root.rstrip("/")):
-            fname      = audio_url.rsplit("/audio/", 1)[-1]
-            audio_file = open(AUDIO_DIR / fname, "rb")
+        if url.startswith(request.url_root):
+            name = url.rsplit("/audio/",1)[-1]
+            f = open(AUDIO_DIR/name,"rb")
         else:
-            resp       = requests.get(audio_url, timeout=60)
-            resp.raise_for_status()
-            audio_file = io.BytesIO(resp.content)
-            audio_file.name = "audio.mp3"
-
-        # 1) Gera SRT
-        srt_text = openai.audio.transcriptions.create(
-            model="whisper-1",
-            file=audio_file,
-            response_format="srt"
+            r = requests.get(url,timeout=60); r.raise_for_status()
+            f = io.BytesIO(r.content); f.name="audio.mp3"
+        srt = openai.audio.transcriptions.create(
+            model="whisper-1", file=f, response_format="srt"
         )
-
-        # 2) Função de parsing
+        # parse SRT
         def parse_ts(ts):
-            h, m, rest = ts.split(":")
-            s, ms      = rest.split(",")
-            return int(h)*3600 + int(m)*60 + int(s) + int(ms)/1000
-
-        # 3) Monta lista de blocos
-        segments = []
-        for block in srt_text.strip().split("\n\n"):
-            lines = block.split("\n")
-            if len(lines) >= 3:
-                start_str, end_str = lines[1].split(" --> ")
-                text = " ".join(lines[2:])
-                segments.append({
-                    "inicio": parse_ts(start_str),
-                    "fim":    parse_ts(end_str),
-                    "texto":  text
-                })
-
-        return jsonify({
-            "duracao_total": segments[-1]["fim"],
-            "transcricao":   segments
-        })
-
+            h,m,rest=ts.split(":")
+            s,ms=rest.split(",")
+            return int(h)*3600+int(m)*60+int(s)+int(ms)/1000
+        segs=[]
+        for blk in srt.strip().split("\n\n"):
+            lines=blk.split("\n")
+            if len(lines)>=3:
+                a,b=lines[1].split(" --> ")
+                txt=" ".join(lines[2:])
+                segs.append({"inicio":parse_ts(a),"fim":parse_ts(b),"texto":txt})
+        total=segs[-1]["fim"] if segs else 0
+        return jsonify({"duracao_total":total,"transcricao":segs})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
+        return jsonify({"error":str(e)}),500
     finally:
-        try: audio_file.close()
+        try: f.close()
         except: pass
 
-# Bloco 8 - Endpoint /gerar_csv
+# ---------- Bloco 6: /gerar_csv ----------
 
 @app.route("/gerar_csv", methods=["POST"])
 def gerar_csv():
     data = request.get_json() or {}
-    transcricao   = data.get("transcricao", [])
-    prompts       = data.get("prompts", [])
-    descricao     = data.get("descricao", "")
-    mp3_filename  = data.get("mp3_filename")  # ← indentado corretamente
-
-    # se não foi passado, detecta o único .mp3 na pasta
-    if not mp3_filename:
-        mp3s = list(AUDIO_DIR.glob("*.mp3"))
-        if len(mp3s) == 1:
-            mp3_filename = mp3s[0].name
-        elif len(mp3s) == 0:
-            return jsonify({"error": "Nenhum arquivo .mp3 encontrado na pasta."}), 400
-        else:
-            return jsonify({
-                "error": "Múltiplos arquivos .mp3 encontrados. "
-                         "Informe qual usar via 'mp3_filename' ou remova os extras."
-            }), 400
-
-    slug     = data.get("slug", Path(mp3_filename).stem)
-
-    if not transcricao or not prompts or len(transcricao) != len(prompts):
-        return jsonify({"error": "transcricao+prompts inválidos"}), 400
-
-    mp3_path = AUDIO_DIR / mp3_filename
-    if not mp3_path.exists():
-        return jsonify({"error": "MP3 não encontrado"}), 400
-
-    drive    = get_drive_service()
-    pasta_id = criar_pasta_drive(slug, drive)
-
-    csv_path = CSV_DIR / f"{slug}.csv"
-    srt_path = FILES_DIR / f"{slug}.srt"
-    txt_path = FILES_DIR / f"{slug}.txt"
-
-
+    trans = data.get("transcricao",[])
+    prompts = data.get("prompts",[])
+    desc = data.get("descricao","")
+    mp3_fn = data.get("mp3_filename")
+    # auto-detect MP3
+    if not mp3_fn:
+        lst=list(AUDIO_DIR.glob("*.mp3"))
+        if len(lst)==1: mp3_fn=lst[0].name
+        else: return jsonify({"error":"mp3_filename obrigatório ou múltiplos"}),400
+    slug = data.get("slug", Path(mp3_fn).stem)
+    if not trans or len(trans)!=len(prompts):
+        return jsonify({"error":"transcricao+prompts inválidos"}),400
+    p = AUDIO_DIR/mp3_fn
+    if not p.exists(): return jsonify({"error":"MP3 não encontrado"}),400
+    drive = get_drive_service()
+    fid = criar_pasta_drive(slug,drive)
+    csvp = CSV_DIR/f"{slug}.csv"
+    srtp = FILES_DIR/f"{slug}.srt"
+    txtp = FILES_DIR/f"{slug}.txt"
     # CSV
-    header = ["PROMPT", "VISIBILITY", "ASPECT_RATIO", "MAGIC_PROMPT", "MODEL",
-              "SEED_NUMBER", "RENDERING", "NEGATIVE_PROMPT", "STYLE", "COLOR_PALETTE"]
-    neg = "low quality, overexposed, underexposed, extra limbs, extra fingers, missing fingers, disfigured, deformed, bad anatomy"
-    with open(csv_path, "w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
-        w.writerow(header)
-        for seg, prompt in zip(transcricao, prompts):
-            sec = int(round(seg["inicio"]))
-            pf = f"{sec} - Painting style: Traditional watercolor, with soft brush strokes and handmade paper texture. {prompt}"
-            w.writerow([pf, "PRIVATE", "9:16", "ON", "3.0", "", "TURBO", neg, "AUTO", ""])
-
+    hdr=["PROMPT","VISIBILITY","ASPECT_RATIO","MAGIC_PROMPT","MODEL",
+         "SEED_NUMBER","RENDERING","NEGATIVE_PROMPT","STYLE","COLOR_PALETTE"]
+    neg="low quality, overexposed, underexposed, extra limbs"
+    with open(csvp,"w",newline="",encoding="utf-8") as f:
+        w=csv.writer(f); w.writerow(hdr)
+        for seg,prompt in zip(trans,prompts):
+            sec=int(round(seg["inicio"]))
+            row=f"{sec} - Painting style: Traditional watercolor, with soft brush strokes and handmade paper texture. {prompt}"
+            w.writerow([row,"PRIVATE","9:16","ON","3.0","","TURBO",neg,"AUTO",""])
     # SRT
-    with open(srt_path, "w", encoding="utf-8") as s:
-        for i, seg in enumerate(transcricao, 1):
-            s.write(f"{i}\n{format_ts(seg['inicio'])} --> {format_ts(seg['fim'])}\n{seg['texto'].strip()}\n\n")
-
+    with open(srtp,"w",encoding="utf-8") as s:
+        for i,seg in enumerate(trans,1):
+            s.write(f"{i}\n{format_ts(seg['inicio'])} --> {format_ts(seg['fim'])}\n{seg['texto']}\n\n")
     # TXT
-    with open(txt_path, "w", encoding="utf-8") as t:
-        t.write(descricao.strip())
+    with open(txtp,"w",encoding="utf-8") as t:
+        t.write(desc.strip())
+    # uploads
+    upload_arquivo_drive(csvp,"imagens.csv",fid,drive)
+    upload_arquivo_drive(srtp,"legenda.srt",fid,drive)
+    upload_arquivo_drive(txtp,"descricao.txt",fid,drive)
+    upload_arquivo_drive(p,"voz.mp3",fid,drive)
+    return jsonify({"folder_url":f"https://drive.google.com/drive/folders/{fid}"})
 
-    # Uploads
-    upload_arquivo_drive(csv_path, "imagens.csv", pasta_id, drive)
-    upload_arquivo_drive(srt_path, "legenda.srt", pasta_id, drive)
-    upload_arquivo_drive(txt_path, "descricao.txt", pasta_id, drive)
-    upload_arquivo_drive(mp3_path, "voz.mp3", pasta_id, drive)
+# ---------- Bloco 7: /upload_zip ----------
 
-    return jsonify({"folder_url": f"https://drive.google.com/drive/folders/{pasta_id}"})
-
-# Bloco 9 - Upload ZIP e Seleção de Imagens
 @app.route("/upload_zip", methods=["POST"])
 def upload_zip():
     file = request.files.get("zip")
-    if not file:
-        return jsonify({"error": "Campo 'zip' obrigatório."}), 400
+    if not file: return jsonify({"error":"Campo 'zip' obrigatório."}),400
+    projetos=[p for p in FILES_DIR.iterdir() if p.is_dir() and not p.name.endswith("_raw")]
+    if len(projetos)!=1:
+        return jsonify({"error":"Esperado 1 pasta de projeto, achado %d."%len(projetos)}),400
+    slug = projetos[0].name
+    temp = FILES_DIR/f"{slug}_raw"
+    out  = FILES_DIR/slug
+    temp.mkdir(exist_ok=True); out.mkdir(exist_ok=True)
+    zpath = temp/"imagens.zip"; file.save(zpath)
+    with zipfile.ZipFile(zpath,"r") as z: z.extractall(temp)
+    imgs = [f for f in temp.glob("*.*") if f.suffix.lower() in [".jpg",".jpeg",".png"]]
+    if not imgs: return jsonify({"error":"Nenhuma imagem no ZIP."}),400
+    csvp = CSV_DIR/f"{slug}.csv"
+    if not csvp.exists(): return jsonify({"error":"CSV não encontrado."}),400
+    prompts=[]
+    with open(csvp,newline="",encoding="utf-8") as f:
+        rd=csv.DictReader(f)
+        for r in rd: prompts.append(r["PROMPT"].split(" - ",1)[-1].strip())
+    usadas=[]
+    for i,prompt in enumerate(prompts):
+        best=selecionar_imagem_mais_similar(prompt,imgs)
+        if best:
+            dst=out/f"{i:02d}_{best.name}"
+            best.rename(dst); imgs.remove(best); usadas.append(dst.name)
+    return jsonify({"ok":True,"slug":slug,"usadas":usadas})
 
-    # detecta automaticamente a pasta de projeto existente (única)
-    projetos = [p for p in FILES_DIR.iterdir() if p.is_dir() and not p.name.endswith("_raw")]
-    if len(projetos) == 0:
-        return jsonify({"error": "Nenhuma pasta de projeto encontrada."}), 400
-    if len(projetos) > 1:
-        return jsonify({"error": "Mais de uma pasta encontrada. Especifique manualmente."}), 400
+# ---------- Bloco 8: /montar_video ----------
 
-    slug       = projetos[0].name
-    temp_dir   = FILES_DIR / f"{slug}_raw"
-    output_dir = FILES_DIR / slug
-    temp_dir.mkdir(exist_ok=True)
-    output_dir.mkdir(exist_ok=True)
-
-    zip_path = temp_dir / "imagens.zip"
-    file.save(zip_path)
-
-    with zipfile.ZipFile(zip_path, 'r') as z:
-        z.extractall(temp_dir)
-
-    imagens = [f for f in temp_dir.glob("*.*") if f.suffix.lower() in [".jpg","jpeg",".png"]]
-    if not imagens:
-        return jsonify({"error": "Nenhuma imagem encontrada no ZIP."}), 400
-
-    # lê prompts do CSV do mesmo slug
-    csv_path = CSV_DIR / f"{slug}.csv"
-    if not csv_path.exists():
-        return jsonify({"error": "CSV não encontrado para este projeto."}), 400
-
-    prompts = []
-    with open(csv_path, newline='', encoding='utf-8') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            # extrai texto puro depois do prefixo "<n> - "
-            prompts.append(row["PROMPT"].split(" - ",1)[-1].strip())
-
-    # seleciona a melhor imagem para cada prompt...
-    usadas = []
-    for i, prompt in enumerate(prompts):
-        melhor = selecionar_imagem_mais_similar(prompt, imagens)
-        if melhor:
-            destino = output_dir / f"{i:02d}_{melhor.name}"
-            melhor.rename(destino)
-            imagens.remove(melhor)
-            usadas.append(destino.name)
-
-    return jsonify({
-        "ok": True,
-        "slug": slug,
-        "total_prompts": len(prompts),
-        "total_imagens": len(usadas),
-        "usadas": usadas
-    })
-
-# Bloco 10 - Montagem de Vídeo e Encerramento
 @app.route("/montar_video", methods=["POST"])
 def montar_video():
     from difflib import SequenceMatcher
-
-    def similaridade(a, b):
-        return SequenceMatcher(None, a.lower(), b.lower()).ratio()
-
-    data = request.get_json(force=True)
-    slug = data.get("slug")
-    folder_id = data.get("folder_id")
-
-    pasta_local = FILES_DIR / slug
-    imagens = sorted([
-        f for f in pasta_local.iterdir()
-        if f.suffix.lower() in ['.jpg', '.jpeg', '.png']
-    ])
-
-    mp3s = list(AUDIO_DIR.glob("*.mp3"))
-    if not mp3s:
-        return jsonify({"error": "Nenhum arquivo de áudio encontrado."}), 400
-    audio_path = mp3s[0]
-
-    srt_files = list(FILES_DIR.glob("*.srt"))
-    if not srt_files:
-        return jsonify({"error": "Nenhum arquivo de legenda .srt encontrado."}), 400
-    transcricao_path = srt_files[0]
-
-    csvs = list(CSV_DIR.glob("*.csv"))
-    if not csvs:
-        return jsonify({"error": "Nenhum arquivo CSV encontrado."}), 400
-    csv_path = csvs[0]
-
-    prompts = []
-    with open(csv_path, newline='', encoding="utf-8") as f:
-        reader = csv.reader(f)
-        next(reader)
-        for row in reader:
-            if row:
-                prompt = row[0].split(" - ", 1)[-1]
-                prompts.append(prompt)
-
-    associadas = []
-    usadas = set()
-    for prompt in prompts:
-        melhor = max(
-            [img for img in imagens if img not in usadas],
-            key=lambda img: similaridade(prompt, img.stem),
-            default=None
-        )
-        if melhor:
-            associadas.append(melhor)
-            usadas.add(melhor)
-        else:
-            associadas.append(imagens[0])
-
-    with open(transcricao_path, encoding="utf-8") as f:
-        blocos = f.read().strip().split("\n\n")
-        transcricao = []
-        for bloco in blocos:
-            partes = bloco.split("\n")
-            if len(partes) >= 3:
-                tempos = partes[1].split(" --> ")
-                inicio = sum(float(x) * 60**i for i, x in enumerate(reversed(tempos[0].replace(",", ".").split(":"))))
-                fim = sum(float(x) * 60**i for i, x in enumerate(reversed(tempos[1].replace(",", ".").split(":"))))
-                texto = " ".join(partes[2:])
-                transcricao.append({"inicio": inicio, "fim": fim, "texto": texto})
-
-    audio_clip = AudioFileClip(str(audio_path))
-    clips = []
-
-    for i, bloco in enumerate(transcricao):
-        tempo = bloco["fim"] - bloco["inicio"]
-        texto = bloco["texto"]
-        img = ImageClip(str(associadas[i % len(associadas)])).resize(height=720).crop(x_center='center', width=1280).set_duration(tempo)
-        zoom = img.resize(lambda t: 1 + 0.02 * t)
-        legenda = TextClip(texto.upper(), fontsize=60, font='DejaVu-Sans-Bold', color='white',
-                           stroke_color='black', stroke_width=2, size=(1280, None), method='caption'
-                           ).set_duration(tempo).set_position(('center', 'bottom'))
-        grain = make_grain().set_opacity(0.05).set_duration(tempo)
-        luz = VideoFileClip("sobrepor.mp4").resize((1280, 720)).set_opacity(0.07).set_duration(tempo)
-        marca = ImageClip("sobrepor.png").resize(height=100).set_position((20, 20)).set_opacity(1).set_duration(tempo)
-        comp = CompositeVideoClip([zoom, grain, luz, marca, legenda], size=(1280, 720))
+    def sim(a,b): return SequenceMatcher(None,a.lower(),b.lower()).ratio()
+    data=request.get_json(force=True)
+    slug, fid = data.get("slug"), data.get("folder_id")
+    folder=FILES_DIR/slug
+    imgs=sorted([f for f in folder.iterdir() if f.suffix.lower() in ['.jpg','.jpeg','.png']])
+    mp3s=list(AUDIO_DIR.glob("*.mp3"))
+    if not mp3s: return jsonify({"error":"Nenhum áudio."}),400
+    audio=mp3s[0]
+    srtf=list(FILES_DIR.glob("*.srt"))
+    if not srtf: return jsonify({"error":"Nenhuma SRT."}),400
+    csvs=list(CSV_DIR.glob("*.csv"))
+    if not csvs: return jsonify({"error":"Nenhum CSV."}),400
+    # lê prompts
+    prompts=[]
+    with open(csvs[0],newline="",encoding="utf-8") as f:
+        rd=csv.reader(f); next(rd)
+        for r in rd: prompts.append(r[0].split(" - ",1)[-1])
+    # associa
+    assoc=[]; used=set()
+    for p in prompts:
+        mv=max([i for i in imgs if i not in used], key=lambda x:sim(p,x.stem), default=None)
+        assoc.append(mv or imgs[0]); used.add(mv or imgs[0])
+    # lê SRT
+    trans=[]
+    with open(srtf[0],encoding="utf-8") as f:
+        for blk in f.read().split("\n\n"):
+            ln=blk.split("\n")
+            if len(ln)>=3:
+                a,b=ln[1].split(" --> ")
+                def pt(ts): h,m,r=ts.split(":"); s,ms=r.split(","); return int(h)*3600+int(m)*60+int(s)+int(ms)/1000
+                trans.append({"inicio":pt(a),"fim":pt(b),"texto":" ".join(ln[2:])})
+    ac = AudioFileClip(str(audio))
+    clips=[]
+    for i,seg in enumerate(trans):
+        dur=seg["fim"]-seg["inicio"]
+        img=ImageClip(str(assoc[i%len(assoc)])).resize(height=720).crop(x_center='center',width=1280).set_duration(dur)
+        zoom=img.resize(lambda t:1+0.02*t)
+        txt=TextClip(seg["texto"].upper(),fontsize=60,font='DejaVu-Sans-Bold',color='white',
+                     stroke_color='black',stroke_width=2,method='caption',size=(1280,None)
+                    ).set_duration(dur).set_position(('center','bottom'))
+        grain=make_grain().set_opacity(0.05).set_duration(dur)
+        luz=VideoFileClip("sobrepor.mp4").resize((1280,720)).set_opacity(0.07).set_duration(dur)
+        marca=ImageClip("sobrepor.png").resize(height=100).set_position((20,20)).set_duration(dur)
+        comp=CompositeVideoClip([zoom,grain,luz,marca,txt],size=(1280,720))
         clips.append(comp)
+    # encerramento
+    end_img=ImageClip("fechamento.png").resize(height=720).crop(x_center='center',width=1280).set_duration(3)
+    gf=make_grain().set_opacity(0.05).set_duration(3)
+    lf=VideoFileClip("sobrepor.mp4").resize((1280,720)).set_opacity(0.07).set_duration(3)
+    end=CompositeVideoClip([end_img,gf,lf],size=(1280,720))
+    final=concatenate_videoclips(clips+[end]).set_audio(ac)
+    outp=FILES_DIR/f"{slug}.mp4"
+    final.write_videofile(str(outp),fps=24,codec='libx264',audio_codec='aac')
+    drive=get_drive_service()
+    upload_arquivo_drive(outp,"video_final.mp4",fid,drive)
+    return jsonify({"ok":True,"folder":f"https://drive.google.com/drive/folders/{fid}"})
 
-    encerramento_img = ImageClip("fechamento.png").resize(height=720).crop(x_center='center', width=1280).set_duration(3)
-    luz_final = VideoFileClip("sobrepor.mp4").resize((1280, 720)).set_opacity(0.07).set_duration(3)
-    grain_final = make_grain().set_opacity(0.05).set_duration(3)
-    encerramento = CompositeVideoClip([encerramento_img, grain_final, luz_final], size=(1280, 720))
+# ---------- Bloco 9: Plugin JSON ----------
 
-    final_video = concatenate_videoclips(clips + [encerramento]).set_audio(audio_clip)
-    output_path = FILES_DIR / f"{slug}.mp4"
-    final_video.write_videofile(str(output_path), fps=24, codec='libx264', audio_codec='aac')
-
-    drive = get_drive_service()
-    upload_arquivo_drive(output_path, "video_final.mp4", folder_id, drive)
-
-    return jsonify({ "ok": True, "video": f"https://drive.google.com/drive/folders/{folder_id}" })
-
-# Bloco Extra - Documentação para GPT-4o
 @app.route('/.well-known/ai-plugin.json')
 def serve_ai_plugin():
-    return send_from_directory('.well-known', 'ai-plugin.json', mimetype='application/json')
+    return send_from_directory('.well-known','ai-plugin.json',mimetype='application/json')
 
 @app.route('/.well-known/openapi.json')
 def serve_openapi():
-    return send_from_directory('.well-known', 'openapi.json', mimetype='application/json')
+    return send_from_directory('.well-known','openapi.json',mimetype='application/json')
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)), debug=True)
+    app.run(host="0.0.0.0",port=int(os.getenv("PORT",5000)),debug=True)
