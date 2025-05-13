@@ -1,4 +1,4 @@
-# Bloco 1
+# Bloco 1 - Imports e Configurações Iniciais
 import os
 import uuid
 import io
@@ -17,16 +17,12 @@ from moviepy.editor import (
     concatenate_videoclips, VideoFileClip
 )
 from moviepy.video.VideoClip import VideoClip
-# from sentence_transformers import SentenceTransformer, util
-
-# Google Drive
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 app = Flask(__name__)
 
-# Pastas locais
 BASE = Path(".")
 AUDIO_DIR = BASE / "audio"
 CSV_DIR = BASE / "csv"
@@ -34,18 +30,12 @@ FILES_DIR = BASE / "downloads"
 for d in [AUDIO_DIR, CSV_DIR, FILES_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
-# Google Drive – pasta raiz
 GOOGLE_DRIVE_FOLDER_ID = "1d6RxnsYRS52oKUPGyuAfJZ00bksUUVI2"
-
-# Chaves
 ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 openai.api_key = OPENAI_KEY
 
-# Modelo CLIP
-# clip_model = SentenceTransformer("clip-ViT-B-32")
-
-# Bloco 2
+# Bloco 2 - Utilitários de Drive e Texto
 
 def get_drive_service():
     creds = service_account.Credentials.from_service_account_file(
@@ -78,8 +68,8 @@ def upload_arquivo_drive(filepath, filename, folder_id, drive):
     media = MediaFileUpload(str(filepath), resumable=True)
     file = drive.files().create(body=file_metadata, media_body=media, fields="id").execute()
     return file.get("id")
-    
-# Bloco 3
+
+# Bloco 3 - Utilidades Visuais e Similaridade
 
 def format_ts(seconds):
     ms = int((seconds % 1) * 1000)
@@ -99,7 +89,7 @@ def selecionar_imagem_mais_similar(prompt, imagens):
     import re
     from sentence_transformers import SentenceTransformer, util
 
-    model = SentenceTransformer("clip-ViT-B-32")  # Carrega apenas quando necessário
+    model = SentenceTransformer("clip-ViT-B-32")
     prompt_emb = model.encode(prompt, convert_to_tensor=True)
 
     melhor_score = -1
@@ -115,8 +105,8 @@ def selecionar_imagem_mais_similar(prompt, imagens):
             melhor_img = img
 
     return melhor_img
-    
-# Bloco 4
+
+# Bloco 4 - Geração de Áudio
 
 def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN", retries=3):
     def enviar_requisicao(payload, desc):
@@ -135,7 +125,6 @@ def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN", retries=3):
                 else:
                     raise RuntimeError(f"Falha ElevenLabs ({desc})") from e
 
-    # 1ª tentativa com style
     p1 = {"text": text, "voice_settings": {"stability": 0.6, "similarity_boost": 0.9, "style": 0.2}}
     try:
         audio = enviar_requisicao(p1, "com style")
@@ -143,14 +132,13 @@ def elevenlabs_tts(text, voice_id="cwIsrQsWEVTols6slKYN", retries=3):
             raise ValueError("Resposta vazia")
         return audio
     except Exception:
-        # 2ª tentativa sem style
         p2 = {"text": text, "voice_settings": {"stability": 0.6, "similarity_boost": 0.9}}
         audio = enviar_requisicao(p2, "sem style")
         if not isinstance(audio, (bytes, bytearray)) or not audio:
             raise ValueError("Resposta vazia")
         return audio
-        
-# Bloco 5
+
+# Bloco 5 - Endpoints Básicos
 
 @app.route("/")
 def home():
@@ -167,9 +155,8 @@ def servir_csv(fn):
 @app.route("/downloads/<path:fn>")
 def servir_down(fn):
     return send_from_directory(FILES_DIR, fn)
-    
-# Bloco 6 – Endpoint /falar
 
+# Bloco 6 - Endpoint /falar
 @app.route("/falar", methods=["POST"])
 def falar():
     data = request.get_json() or {}
@@ -194,9 +181,8 @@ def falar():
         "filename": filename,
         "slug": slug
     })
-    
-# Bloco 7 – Endpoint /transcrever
 
+# Bloco 7 - Endpoint /transcrever
 @app.route("/transcrever", methods=["POST"])
 def transcrever():
     data = request.get_json() or {}
@@ -233,9 +219,8 @@ def transcrever():
             audio_file.close()
         except:
             pass
-            
-# Bloco 8 – Endpoint /gerar_csv
 
+# Bloco 8 - Endpoint /gerar_csv
 @app.route("/gerar_csv", methods=["POST"])
 def gerar_csv():
     data = request.get_json() or {}
@@ -243,19 +228,17 @@ def gerar_csv():
     prompts = data.get("prompts", [])
     descricao = data.get("descricao", "")
     mp3_filename = data.get("mp3_filename")
-
-if not mp3_filename:
-    mp3s = list(AUDIO_DIR.glob("*.mp3"))
-    if len(mp3s) == 1:
-        mp3_filename = mp3s[0].name
-    else:
-        return jsonify({"error": "campo 'mp3_filename' obrigatório ou múltiplos .mp3 encontrados"}), 400
     slug = data.get("slug", str(uuid.uuid4()))
+
+    if not mp3_filename:
+        mp3s = list(AUDIO_DIR.glob("*.mp3"))
+        if len(mp3s) == 1:
+            mp3_filename = mp3s[0].name
+        else:
+            return jsonify({"error": "campo 'mp3_filename' obrigatório ou múltiplos .mp3 encontrados"}), 400
 
     if not transcricao or not prompts or len(transcricao) != len(prompts):
         return jsonify({"error": "transcricao+prompts inválidos"}), 400
-    if not mp3_filename:
-        return jsonify({"error": "campo 'mp3_filename' obrigatório"}), 400
 
     mp3_path = AUDIO_DIR / mp3_filename
     if not mp3_path.exists():
@@ -293,22 +276,20 @@ if not mp3_filename:
     upload_arquivo_drive(mp3_path, "voz.mp3", pasta_id, drive)
 
     return jsonify({"folder_url": f"https://drive.google.com/drive/folders/{pasta_id}"})
-    
-# Bloco 9 – Resto dos endpoints virão no próximo bloco
 
+# Bloco 9 - Upload ZIP e Seleção de Imagens
 @app.route("/upload_zip", methods=["POST"])
 def upload_zip():
     file = request.files.get("zip")
     if not file:
         return jsonify({"error": "Campo 'zip' obrigatório."}), 400
 
-# Detectar automaticamente o slug com base na única pasta de projeto
     pastas_existentes = sorted(FILES_DIR.glob("*/"), key=os.path.getmtime, reverse=True)
     if not pastas_existentes:
         return jsonify({"error": "Nenhuma pasta de projeto encontrada."}), 400
 
-slug_path = pastas_existentes[0]
-slug = slug_path.name.replace("_raw", "")
+    slug_path = pastas_existentes[0]
+    slug = slug_path.name.replace("_raw", "")
 
     temp_dir = FILES_DIR / f"{slug}_raw"
     output_dir = FILES_DIR / slug
@@ -334,7 +315,7 @@ slug = slug_path.name.replace("_raw", "")
         reader = csv.DictReader(f)
         for row in reader:
             prompt = row["PROMPT"]
-            match = re.match(r"\d+ - .*?\\. (.*)", prompt)
+            match = re.match(r"\d+ - .*?\. (.*)", prompt)
             prompts.append(match.group(1) if match else prompt)
 
     usadas = []
@@ -353,9 +334,8 @@ slug = slug_path.name.replace("_raw", "")
         "total_imagens": len(usadas),
         "usadas": usadas
     })
-    
-# Bloco 10 – Final (montagem e execução)
 
+# Bloco 10 - Montagem de Vídeo e Encerramento
 @app.route("/montar_video", methods=["POST"])
 def montar_video():
     from difflib import SequenceMatcher
@@ -372,31 +352,21 @@ def montar_video():
         f for f in pasta_local.iterdir()
         if f.suffix.lower() in ['.jpg', '.jpeg', '.png']
     ])
-    
-# Encontrar automaticamente o único .mp3
-mp3s = list(AUDIO_DIR.glob("*.mp3"))
+
+    mp3s = list(AUDIO_DIR.glob("*.mp3"))
     if not mp3s:
         return jsonify({"error": "Nenhum arquivo de áudio encontrado."}), 400
-audio_path = mp3s[0]
+    audio_path = mp3s[0]
 
-# Encontrar automaticamente o único .srt
-srt_files = list(FILES_DIR.glob("*.srt"))
-    if not srt_files:
-        return jsonify({"error": "Nenhum arquivo de legenda .srt encontrado."}), 400
-transcricao_path = srt_files[0]
-
-# Encontrar automaticamente o único .csv
-csvs = list(CSV_DIR.glob("*.csv"))
-    if not csvs:
-        return jsonify({"error": "Nenhum arquivo CSV encontrado."}), 400
-    csv_path = csvs[0]
-
-
-srt_files = list(FILES_DIR.glob("*.srt"))
+    srt_files = list(FILES_DIR.glob("*.srt"))
     if not srt_files:
         return jsonify({"error": "Nenhum arquivo de legenda .srt encontrado."}), 400
     transcricao_path = srt_files[0]
 
+    csvs = list(CSV_DIR.glob("*.csv"))
+    if not csvs:
+        return jsonify({"error": "Nenhum arquivo CSV encontrado."}), 400
+    csv_path = csvs[0]
 
     prompts = []
     with open(csv_path, newline='', encoding="utf-8") as f:
@@ -464,14 +434,14 @@ srt_files = list(FILES_DIR.glob("*.srt"))
 
     return jsonify({ "ok": True, "video": f"https://drive.google.com/drive/folders/{folder_id}" })
 
+# Bloco Extra - Documentação para GPT-4o
 @app.route('/.well-known/ai-plugin.json')
 def serve_ai_plugin():
     return send_from_directory('.well-known', 'ai-plugin.json', mimetype='application/json')
-    
+
 @app.route('/.well-known/openapi.json')
 def serve_openapi():
     return send_from_directory('.well-known', 'openapi.json', mimetype='application/json')
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)), debug=True)
-    
