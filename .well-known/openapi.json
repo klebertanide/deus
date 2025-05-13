@@ -1,9 +1,8 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "API Deus Te Enviou Isso",
-    "version": "1.0.0",
-    "description": "API que converte texto em voz, gera transcrição, arquivos CSV/SRT/TXT e monta vídeos automáticos com imagens e narração."
+    "title": "DeusTeEnviouIsso API",
+    "version": "1.0.0"
   },
   "servers": [
     {
@@ -13,7 +12,7 @@
   "paths": {
     "/falar": {
       "post": {
-        "summary": "Gera áudio a partir de um texto",
+        "summary": "Gera áudio com ElevenLabs",
         "operationId": "falar",
         "requestBody": {
           "required": true,
@@ -23,8 +22,7 @@
                 "type": "object",
                 "properties": {
                   "texto": {
-                    "type": "string",
-                    "description": "Texto a ser convertido em áudio"
+                    "type": "string"
                   }
                 },
                 "required": ["texto"]
@@ -41,7 +39,7 @@
     },
     "/transcrever": {
       "post": {
-        "summary": "Transcreve um áudio MP3 para texto com marcações de tempo",
+        "summary": "Transcreve o áudio gerado",
         "operationId": "transcrever",
         "requestBody": {
           "required": true,
@@ -51,8 +49,7 @@
                 "type": "object",
                 "properties": {
                   "audio_url": {
-                    "type": "string",
-                    "description": "URL do áudio gerado anteriormente"
+                    "type": "string"
                   }
                 },
                 "required": ["audio_url"]
@@ -62,7 +59,105 @@
         },
         "responses": {
           "200": {
-            "description": "Transcrição retornada com sucesso"
+            "description": "Transcrição retornada"
+          }
+        }
+      }
+    },
+    "/gerar_csv": {
+      "post": {
+        "summary": "Gera CSV, SRT e TXT com prompts e envia ao Drive",
+        "operationId": "gerarCsv",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "transcricao": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "inicio": { "type": "number" },
+                        "fim": { "type": "number" },
+                        "texto": { "type": "string" }
+                      },
+                      "required": ["inicio", "fim", "texto"]
+                    }
+                  },
+                  "prompts": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "descricao": {
+                    "type": "string"
+                  }
+                },
+                "required": ["transcricao", "prompts", "descricao"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Arquivos gerados e enviados ao Drive"
+          }
+        }
+      }
+    },
+    "/upload_zip": {
+      "post": {
+        "summary": "Faz upload de imagens .zip e associa automaticamente",
+        "operationId": "uploadZip",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "zip": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                },
+                "required": ["zip"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Imagens processadas e selecionadas"
+          }
+        }
+      }
+    },
+    "/montar_video": {
+      "post": {
+        "summary": "Monta vídeo completo com base no contexto anterior",
+        "operationId": "montarVideo",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "folder_id": {
+                    "type": "string"
+                  }
+                },
+                "required": ["folder_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Vídeo montado com sucesso e enviado ao Drive"
           }
         }
       }
