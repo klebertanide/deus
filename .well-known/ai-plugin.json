@@ -1,17 +1,18 @@
 {
   "schema_version": "v1",
-  "name_for_model": "deus_te_enviou",
   "name_for_human": "DeusTeEnviouIsso",
-  "description_for_model": "Cria vídeos automáticos com voz gerada por IA, transcrição, imagens, CSV, legenda e upload no Google Drive.",
-  "description_for_human": "Gere vídeos completos a partir de um texto curto. Receba áudio, legenda, imagens e vídeo final no seu Drive.",
+  "name_for_model": "deusteenviouisso",
+  "description_for_human": "Gera textos bíblicos inspiradores, TTS, transcrição, prompts e montagem de vídeo.",
+  "description_for_model": "Plugin para gerar texto inspirado na Bíblia, converter em áudio, transcrever, criar CSV/SRT/TXT, selecionar imagens e montar vídeos.",
   "auth": {
     "type": "none"
   },
   "api": {
     "type": "openapi",
-    "url": "https://deus-w0i8.onrender.com/.well-known/openapi.json"
+    "url": "https://deus-w0i8.onrender.com/.well-known/openapi.json",
+    "is_user_authenticated": false
   },
-  "logo_url": "https://deus-w0i8.onrender.com/static/logo.png",
-  "contact_email": "suporte@deusteenvio.com",
-  "legal_info_url": "https://deus-w0i8.onrender.com/termos"
+  "logo_url": "https://deus-w0i8.onrender.com/.well-known/logo.png",
+  "contact_email": "support@deusteenviouisso.com",
+  "legal_info_url": "https://deus-w0i8.onrender.com/legal"
 }
