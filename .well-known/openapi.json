@@ -93,6 +93,14 @@
                   },
                   "descricao": {
                     "type": "string"
+                  },
+                  "mp3_filename": {
+                    "type": "string",
+                    "description": "Nome do arquivo de áudio (opcional se houver apenas um .mp3 na pasta)"
+                  },
+                  "slug": {
+                    "type": "string",
+                    "description": "Slug do projeto (opcional, será inferido do mp3 se omitido)"
                   }
                 },
                 "required": ["transcricao", "prompts", "descricao"]
