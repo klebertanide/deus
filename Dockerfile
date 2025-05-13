@@ -1,24 +1,20 @@
-# Usa imagem oficial Python 3.11
-FROM python:3.11-slim
+# Usa imagem base com Python 3.11
+FROM python:3.11
 
 WORKDIR /app
+COPY . /app
+COPY .well-known /app/.well-known
 
-# Instala dependências de SO
 RUN apt-get update && apt-get install -y \
     ffmpeg libsm6 libxext6 git \
     && rm -rf /var/lib/apt/lists/*
 
-# Copia requisitos e instala PyTorch CPU
-COPY requirements.txt /app/requirements.txt
+# PyTorch CPU-only 2.3.1
 RUN pip install --no-cache-dir \
-    https://download.pytorch.org/whl/cpu/torch-2.2.2%2Bcpu-cp311-cp311-linux_x86_64.whl
+    https://download.pytorch.org/whl/cpu/torch-2.3.1%2Bcpu-cp311-cp311-linux_x86_64.whl \
+    torchaudio==2.3.1+cpu
 
-# Instala demais dependências
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia código
-COPY . /app
-
 EXPOSE 5000
-
 CMD ["python", "main.py"]
