@@ -243,6 +243,13 @@ def gerar_csv():
     prompts = data.get("prompts", [])
     descricao = data.get("descricao", "")
     mp3_filename = data.get("mp3_filename")
+
+if not mp3_filename:
+    mp3s = list(AUDIO_DIR.glob("*.mp3"))
+    if len(mp3s) == 1:
+        mp3_filename = mp3s[0].name
+    else:
+        return jsonify({"error": "campo 'mp3_filename' obrigatório ou múltiplos .mp3 encontrados"}), 400
     slug = data.get("slug", str(uuid.uuid4()))
 
     if not transcricao or not prompts or len(transcricao) != len(prompts):
@@ -295,12 +302,14 @@ def upload_zip():
     if not file:
         return jsonify({"error": "Campo 'zip' obrigatório."}), 400
 
+# Detectar automaticamente o slug com base na única pasta de projeto
     pastas_existentes = sorted(FILES_DIR.glob("*/"), key=os.path.getmtime, reverse=True)
     if not pastas_existentes:
         return jsonify({"error": "Nenhuma pasta de projeto encontrada."}), 400
 
-    slug_path = pastas_existentes[0]
-    slug = slug_path.name.replace("_raw", "")
+slug_path = pastas_existentes[0]
+slug = slug_path.name.replace("_raw", "")
+
     temp_dir = FILES_DIR / f"{slug}_raw"
     output_dir = FILES_DIR / slug
     temp_dir.mkdir(parents=True, exist_ok=True)
@@ -363,23 +372,31 @@ def montar_video():
         f for f in pasta_local.iterdir()
         if f.suffix.lower() in ['.jpg', '.jpeg', '.png']
     ])
-    if not imagens:
-        return jsonify({"error": "Nenhuma imagem encontrada."}), 400
-
-    mp3s = list(AUDIO_DIR.glob("*.mp3"))
+    
+# Encontrar automaticamente o único .mp3
+mp3s = list(AUDIO_DIR.glob("*.mp3"))
     if not mp3s:
         return jsonify({"error": "Nenhum arquivo de áudio encontrado."}), 400
-    audio_path = mp3s[0]
+audio_path = mp3s[0]
 
-    srt_files = list(FILES_DIR.glob("*.srt"))
+# Encontrar automaticamente o único .srt
+srt_files = list(FILES_DIR.glob("*.srt"))
+    if not srt_files:
+        return jsonify({"error": "Nenhum arquivo de legenda .srt encontrado."}), 400
+transcricao_path = srt_files[0]
+
+# Encontrar automaticamente o único .csv
+csvs = list(CSV_DIR.glob("*.csv"))
+    if not csvs:
+        return jsonify({"error": "Nenhum arquivo CSV encontrado."}), 400
+    csv_path = csvs[0]
+
+
+srt_files = list(FILES_DIR.glob("*.srt"))
     if not srt_files:
         return jsonify({"error": "Nenhum arquivo de legenda .srt encontrado."}), 400
     transcricao_path = srt_files[0]
 
-    csvs = list(CSV_DIR.glob("*.csv"))
-    if not csvs:
-        return jsonify({"error": "Nenhum arquivo CSV encontrado."}), 400
-    csv_path = csvs[0]
 
     prompts = []
     with open(csv_path, newline='', encoding="utf-8") as f:
