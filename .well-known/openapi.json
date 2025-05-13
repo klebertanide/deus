@@ -2,7 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "DeusTeEnviouIsso API",
-    "version": "1.0.0"
+    "version": "1.0.0",
+    "description": "API que gera áudios, transcreve, cria CSV/SRT/TXT, faz upload de imagens ZIP e monta vídeos com base em contexto."
   },
   "servers": [
     {
@@ -93,14 +94,6 @@
                   },
                   "descricao": {
                     "type": "string"
-                  },
-                  "mp3_filename": {
-                    "type": "string",
-                    "description": "Nome do arquivo de áudio (opcional se houver apenas um .mp3 na pasta)"
-                  },
-                  "slug": {
-                    "type": "string",
-                    "description": "Slug do projeto (opcional, será inferido do mp3 se omitido)"
                   }
                 },
                 "required": ["transcricao", "prompts", "descricao"]
@@ -156,9 +149,12 @@
                 "properties": {
                   "folder_id": {
                     "type": "string"
+                  },
+                  "slug": {
+                    "type": "string"
                   }
                 },
-                "required": ["folder_id"]
+                "required": ["folder_id", "slug"]
               }
             }
           }
