@@ -5,145 +5,73 @@
     "version": "1.0.0"
   },
   "servers": [
-    {
-      "url": "https://deus-w0i8.onrender.com"
-    }
+    { "url": "https://SEU_DOMINIO.onrender.com" }
   ],
   "paths": {
     "/falar": {
       "post": {
-        "summary": "Gera áudio TTS",
+        "summary": "Gera áudio com ElevenLabs",
         "operationId": "falar",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "texto": { "type": "string" }
-                },
-                "required": ["texto"]
-              }
-            }
-          }
+        "requestBody": { "required": true,
+          "content": {"application/json": {"schema": {"type":"object","properties":{"texto":{"type":"string"}},"required":["texto"]}}}
         },
-        "responses": {
-          "200": { "description": "Áudio gerado" }
-        }
+        "responses": { "200": {"description": "Áudio gerado"} }
       }
     },
     "/transcrever": {
       "post": {
-        "summary": "Transcreve áudio via Whisper",
+        "summary": "Transcreve áudio (SRT)",
         "operationId": "transcrever",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "audio_url": { "type": "string" }
-                },
-                "required": ["audio_url"]
-              }
-            }
-          }
+        "requestBody": { "required": true,
+          "content": {"application/json": {"schema": {"type":"object","properties":{"audio_url":{"type":"string"}},"required":["audio_url"]}}}
         },
-        "responses": {
-          "200": { "description": "Transcrição" }
-        }
+        "responses": { "200": {"description": "Transcrição SRT"} }
       }
     },
     "/gerar_csv": {
       "post": {
-        "summary": "Gera CSV, SRT, TXT no Drive",
+        "summary": "Gera CSV/SRT/TXT e envia ao Drive",
         "operationId": "gerarCsv",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "slug": { "type": "string" },
-                  "transcricao": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "inicio": { "type": "number" },
-                        "fim": { "type": "number" },
-                        "texto": { "type": "string" }
-                      },
-                      "required": ["inicio", "fim", "texto"]
-                    }
-                  },
-                  "prompts": {
-                    "type": "array",
-                    "items": { "type": "string" }
-                  },
-                  "descricao": { "type": "string" }
-                },
-                "required": ["slug", "transcricao", "prompts"]
-              }
-            }
-          }
+        "requestBody": { "required": true,
+          "content": {"application/json": {"schema":{"type":"object","properties":{
+            "slug":{"type":"string"},
+            "transcricao":{"type":"array","items":{"$ref":"#/components/schemas/Segment"}},"prompts":{"type":"array","items":{"type":"string"}},"descricao":{"type":"string"}
+          },"required":["slug","transcricao","prompts"]}}}
         },
-        "responses": {
-          "200": { "description": "Arquivos gerados" }
-        }
+        "responses": { "200": {"description": "Arquivos criados"} }
       }
     },
     "/upload_zip": {
       "post": {
-        "summary": "Upload de ZIP de imagens",
+        "summary": "Faz upload do ZIP de imagens",
         "operationId": "uploadZip",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "zip": {
-                    "type": "string",
-                    "format": "binary"
-                  }
-                },
-                "required": ["zip"]
-              }
-            }
-          }
+        "requestBody": { "required": true,
+          "content": {"multipart/form-data":{"schema":{"type":"object","properties":{"zip":{"type":"string","format":"binary"}},"required":["zip"]}}}
         },
-        "responses": {
-          "200": { "description": "Imagens processadas" }
-        }
+        "responses": { "200": {"description": "Imagens selecionadas"} }
       }
     },
     "/montar_video": {
       "post": {
-        "summary": "Monta vídeo final",
+        "summary": "Monta vídeo final e envia ao Drive",
         "operationId": "montarVideo",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "slug": { "type": "string" },
-                  "folder_id": { "type": "string" }
-                },
-                "required": ["slug", "folder_id"]
-              }
-            }
-          }
+        "requestBody": { "required": true,
+          "content": {"application/json":{"schema":{"type":"object","properties":{"folder_id":{"type":"string"}},"required":["folder_id"]}}}
         },
-        "responses": {
-          "200": { "description": "Vídeo montado" }
-        }
+        "responses": { "200": {"description": "Vídeo final"} }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Segment": {
+        "type":"object",
+        "properties":{
+          "inicio":{"type":"number"},
+          "fim":{"type":"number"},
+          "texto":{"type":"string"}
+        },
+        "required":["inicio","fim","texto"]
       }
     }
   }
