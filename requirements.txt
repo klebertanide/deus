@@ -4,13 +4,20 @@ requests==2.31.0
 unidecode
 numpy==1.24.0
 moviepy==1.0.3
-google-api-python-client
-google-auth
-google-auth-oauthlib
-google-auth-httplib2
-sentence-transformers
+
+# Google API
+google-api-python-client==2.126.0
+google-auth==2.28.1
+google-auth-oauthlib==1.2.0
+google-auth-httplib2==0.2.0
+
+# Imagem e processamento
 Pillow==9.2.0
-torch>=2.0.0,<2.3.0
-torchaudio==2.0.2
-clip @ git+https://github.com/openai/CLIP.git
-transformers>=4.29.0,<4.40.0
+
+# CLIP via sentence-transformers (mais leve e compatível)
+sentence-transformers==2.2.2
+torch==1.13.1  # Compatível com transformers e sentence-transformers
+torchaudio==0.13.1
+
+# Transformers para compatibilidade com sentence-transformers
+transformers==4.30.2
