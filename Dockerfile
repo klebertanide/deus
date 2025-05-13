@@ -1,30 +1,24 @@
-# Usa imagem base com Python 3.11
-FROM python:3.11
+# 1) imagem base mais enxuta
+FROM python:3.11-slim
 
-# Define o diretório de trabalho dentro do container
 WORKDIR /app
 
-# Copia todos os arquivos do projeto
-COPY . /app
-COPY .well-known /app/.well-known
+# 2) copiar só o requirements para maximizar cache
+COPY requirements.txt /app/
 
-# Instala dependências do sistema necessárias para MoviePy, imageio, Pillow, etc.
+# 3) instalar bibliotecas de sistema e PyTorch CPU
 RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    libsm6 \
-    libxext6 \
-    git \
-    && rm -rf /var/lib/apt/lists/*
+      ffmpeg libsm6 libxext6 git \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir \
+         https://download.pytorch.org/whl/cpu/torch-2.2.2%2Bcpu-cp311-cp311-linux_x86_64.whl \
+    && pip install --no-cache-dir -r requirements.txt
 
-# Instala versão compatível do PyTorch com CPU e Python 3.11
-RUN pip install --no-cache-dir \
-    https://download.pytorch.org/whl/cpu/torch-2.2.2%2Bcpu-cp311-cp311-linux_x86_64.whl
+# 4) agora copie todo o resto do seu código (incluindo .well-known)
+COPY . /app
 
-# Instala as demais dependências do projeto
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Expõe a porta padrão do Flask
+# 5) porta do Flask
 EXPOSE 5000
 
-# Comando para rodar a aplicação
+# 6) comando de inicialização
 CMD ["python", "main.py"]
