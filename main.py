@@ -96,16 +96,24 @@ def make_grain(size=(1280, 720), intensity=10):
     return VideoClip(frame, duration=1).set_fps(24)
 
 def selecionar_imagem_mais_similar(prompt, imagens):
-    prompt_emb = clip_model.encode(prompt, convert_to_tensor=True)
+    import re
+    from sentence_transformers import SentenceTransformer, util
+
+    model = SentenceTransformer("clip-ViT-B-32")  # Carrega apenas quando necessário
+    prompt_emb = model.encode(prompt, convert_to_tensor=True)
+
     melhor_score = -1
     melhor_img = None
+
     for img in imagens:
         nome_limpo = re.sub(r"[^\w\s]", " ", img.stem)
-        nome_emb = clip_model.encode(nome_limpo, convert_to_tensor=True)
+        nome_emb = model.encode(nome_limpo, convert_to_tensor=True)
         score = util.cos_sim(prompt_emb, nome_emb).item()
+
         if score > melhor_score:
             melhor_score = score
             melhor_img = img
+
     return melhor_img
     
 # Bloco 4
