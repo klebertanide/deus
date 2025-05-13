@@ -109,7 +109,6 @@ def servir_csv(fn):
 def servir_down(fn):
     return send_from_directory(FILES_DIR, fn)
 
-# ─── /falar ─────────────────────────────────────────────────────────────────────
 @app.route("/falar", methods=["POST"])
 def falar():
     data  = request.get_json() or {}
@@ -135,7 +134,6 @@ def falar():
         "slug": slug
     })
 
-# ─── /transcrever ────────────────────────────────────────────────────────────────
 @app.route("/transcrever", methods=["POST"])
 def transcrever():
     data      = request.get_json() or {}
@@ -151,10 +149,10 @@ def transcrever():
             r = requests.get(audio_url,timeout=60); r.raise_for_status()
             audio_file = io.BytesIO(r.content); audio_file.name="audio.mp3"
 
-        # gera SRT
         srt_text = openai.audio.transcriptions.create(
             model="whisper-1", file=audio_file, response_format="srt"
         )
+
         def parse_ts(ts):
             h,m,rest = ts.split(":")
             s,ms     = rest.split(",")
@@ -176,14 +174,12 @@ def transcrever():
             "duracao_total": segments[-1]["fim"],
             "transcricao":   segments
         })
-
     except Exception as e:
         return jsonify({"error": str(e)}),500
     finally:
         try: audio_file.close()
         except: pass
 
-# ─── /gerar_csv ──────────────────────────────────────────────────────────────────
 @app.route("/gerar_csv", methods=["POST"])
 def gerar_csv():
     data         = request.get_json() or {}
@@ -192,7 +188,6 @@ def gerar_csv():
     descricao    = data.get("descricao", "")
     mp3_filename = data.get("mp3_filename")
 
-    # auto-detect MP3
     if not mp3_filename:
         mp3s = list(AUDIO_DIR.glob("*.mp3"))
         if len(mp3s)==1:
@@ -203,7 +198,6 @@ def gerar_csv():
             return jsonify({"error":"Vários .mp3 encontrados. Informe 'mp3_filename'."}),400
 
     slug = data.get("slug", Path(mp3_filename).stem)
-
     if not transcricao or not prompts or len(transcricao)!=len(prompts):
         return jsonify({"error":"transcricao+prompts inválidos"}),400
 
@@ -218,7 +212,6 @@ def gerar_csv():
     srt_path = FILES_DIR/f"{slug}.srt"
     txt_path = FILES_DIR/f"{slug}.txt"
 
-    # CSV
     header = [
         "PROMPT","VISIBILITY","ASPECT_RATIO","MAGIC_PROMPT","MODEL",
         "SEED_NUMBER","RENDERING","NEGATIVE_PROMPT","STYLE","COLOR_PALETTE"
@@ -233,17 +226,14 @@ def gerar_csv():
                    f"with soft brush strokes and handmade paper texture. {p}")
             w.writerow([pf,"PRIVATE","9:16","ON","3.0","","TURBO",neg,"AUTO",""])
 
-    # SRT
     with open(srt_path,"w",encoding="utf-8") as s:
         for i,seg in enumerate(transcricao,1):
             s.write(f"{i}\n{format_ts(seg['inicio'])} --> {format_ts(seg['fim'])}\n")
             s.write(f"{seg['texto'].strip()}\n\n")
 
-    # TXT
     with open(txt_path,"w",encoding="utf-8") as t:
         t.write(descricao.strip())
 
-    # upload
     upload_arquivo_drive(csv_path, f"{slug}.csv", pasta_id, drive)
     upload_arquivo_drive(srt_path, f"{slug}.srt", pasta_id, drive)
     upload_arquivo_drive(txt_path, f"{slug}.txt", pasta_id, drive)
@@ -251,7 +241,6 @@ def gerar_csv():
 
     return jsonify({"folder_url":f"https://drive.google.com/drive/folders/{pasta_id}"})
 
-# ─── /upload_zip ────────────────────────────────────────────────────────────────
 @app.route("/upload_zip", methods=["POST"])
 def upload_zip():
     file = request.files.get("zip")
@@ -279,7 +268,6 @@ def upload_zip():
     if not imagens:
         return jsonify({"error":"Nenhuma imagem no ZIP."}),400
 
-    # lê prompts do CSV
     csvp = CSV_DIR/f"{slug}.csv"
     if not csvp.exists():
         return jsonify({"error":"CSV não encontrado para este projeto."}),400
@@ -290,7 +278,6 @@ def upload_zip():
         for row in rdr:
             prompts.append(row["PROMPT"].split(" - ",1)[-1].strip())
 
-    # similaridade simples (stem vs prompt)
     from difflib import SequenceMatcher
     def sim(a,b): return SequenceMatcher(None,a.lower(),b.lower()).ratio()
 
@@ -304,7 +291,6 @@ def upload_zip():
 
     return jsonify({"ok":True,"slug":slug,"usadas":usadas})
 
-# ─── /montar_video ───────────────────────────────────────────────────────────────
 @app.route("/montar_video", methods=["POST"])
 def montar_video():
     from difflib import SequenceMatcher
@@ -340,16 +326,12 @@ def montar_video():
         for row in rdr:
             prompts.append(row[0].split(" - ",1)[-1])
 
-    # associa em ordem
     assoc,used = [],set()
     for p in prompts:
         best = max([i for i in imgs if i not in used], key=lambda x: sim(p,x.stem), default=None)
-        if best:
-            assoc.append(best); used.add(best)
-        else:
-            assoc.append(imgs[0])
+        assoc.append(best or imgs[0])
+        used.add(best or imgs[0])
 
-    # parse SRT
     with open(srt_path,encoding='utf-8') as f:
         bloco = f.read().strip().split("\n\n")
     trans=[]
@@ -364,7 +346,6 @@ def montar_video():
 
     audio_clip = AudioFileClip(str(audio_path))
     clips=[]
-
     for idx,seg in enumerate(trans):
         dur   = seg["fim"]-seg["inicio"]
         img_c = ImageClip(str(assoc[idx%len(assoc)])).resize(height=720).crop(x_center='center',width=1280).set_duration(dur)
@@ -387,7 +368,6 @@ def montar_video():
 
     return jsonify({"ok":True,"video":f"https://drive.google.com/drive/folders/{folder_id}"})
 
-# serve plugin & openapi
 @app.route('/.well-known/ai-plugin.json')
 def serve_ai_plugin():
     return send_from_directory('.well-known','ai-plugin.json',mimetype='application/json')
