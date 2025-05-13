@@ -284,62 +284,34 @@ def gerar_csv():
     return jsonify({"folder_url": f"https://drive.google.com/drive/folders/{pasta_id}"})
 
 # Bloco 9 - Upload ZIP e Seleção de Imagens
-@app.route("/upload_zip", methods=["POST"])
-def upload_zip():
-    file = request.files.get("zip")
-    if not file:
-        return jsonify({"error": "Campo 'zip' obrigatório."}), 400
-
-    pastas_existentes = sorted(FILES_DIR.glob("*/"), key=os.path.getmtime, reverse=True)
-    if not pastas_existentes:
-        return jsonify({"error": "Nenhuma pasta de projeto encontrada."}), 400
-
-    slug_path = pastas_existentes[0]
-    slug = slug_path.name.replace("_raw", "")
-
-    temp_dir = FILES_DIR / f"{slug}_raw"
-    output_dir = FILES_DIR / slug
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    zip_path = temp_dir / "imagens.zip"
-    file.save(zip_path)
-
-    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-        zip_ref.extractall(temp_dir)
-
-    imagens = [f for f in temp_dir.glob("*.*") if f.suffix.lower() in [".jpg", ".jpeg", ".png"]]
-    if not imagens:
-        return jsonify({"error": "Nenhuma imagem encontrada no ZIP."}), 400
-
-    csv_path = CSV_DIR / f"{slug}.csv"
-    if not csv_path.exists():
-        return jsonify({"error": f"CSV '{csv_path.name}' não encontrado."}), 400
-
-    prompts = []
-    with open(csv_path, newline='', encoding='utf-8') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            prompt = row["PROMPT"]
-            match = re.match(r"\d+ - .*?\. (.*)", prompt)
-            prompts.append(match.group(1) if match else prompt)
-
-    usadas = []
-    for i, prompt in enumerate(prompts):
-        img = selecionar_imagem_mais_similar(prompt, imagens)
-        if img:
-            destino = output_dir / f"{i:02d}_{img.name}"
-            img.rename(destino)
-            imagens.remove(img)
-            usadas.append(destino.name)
-
-    return jsonify({
-        "ok": True,
-        "slug": slug,
-        "total_prompts": len(prompts),
-        "total_imagens": len(usadas),
-        "usadas": usadas
-    })
+"/upload_zip": {
+  "post": {
+    "summary": "Faz upload de imagens .zip e associa automaticamente",
+    "operationId": "uploadZip",
+    "requestBody": {
+      "required": true,
+      "content": {
+        "multipart/form-data": {
+          "schema": {
+            "type": "object",
+            "properties": {
+              "zip": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "required": ["zip"]
+          }
+        }
+      }
+    },
+    "responses": {
+      "200": {
+        "description": "Imagens processadas e selecionadas"
+      }
+    }
+  }
+}
 
 # Bloco 10 - Montagem de Vídeo e Encerramento
 @app.route("/montar_video", methods=["POST"])
