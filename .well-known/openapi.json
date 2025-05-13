@@ -2,129 +2,17 @@
   "openapi": "3.1.0",
   "info": {
     "title": "DeusTeEnviouIsso API",
-    "version": "1.0.0",
-    "description": "API para geração de texto bíblico, TTS, transcrição, CSV/SRT/TXT, seleção de imagens e montagem de vídeo."
+    "version": "1.0.0"
   },
   "servers": [
     {
-      "url": "https://deus-w0i8.onrender.com",
-      "description": "Produção"
+      "url": "https://deus-w0i8.onrender.com"
     }
   ],
   "paths": {
-    "/sugerir_versiculos": {
-      "post": {
-        "summary": "Sugere 15 versículos a partir de um tema",
-        "operationId": "sugerirVersiculos",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "tema": {
-                    "type": "string",
-                    "description": "Tema ou palavra para buscar versículos"
-                  }
-                },
-                "required": ["tema"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Lista de versículos",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "versiculos": {
-                      "type": "array",
-                      "items": {
-                        "type": "string",
-                        "description": "Versículo no formato Livro Cap:Ver Texto"
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/gerar_texto": {
-      "post": {
-        "summary": "Gera texto inspirador baseado em modo e input",
-        "operationId": "gerarTexto",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "modo": {
-                    "type": "string",
-                    "enum": ["frase", "versiculo", "aleatorio"],
-                    "description": "Modo de geração: frase, versiculo ou aleatorio"
-                  },
-                  "input": {
-                    "type": "string",
-                    "description": "Versículo ou tema (apenas para modo 'versiculo')"
-                  }
-                },
-                "required": ["modo"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Texto gerado e, se aplicável, versículos",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "versiculos": {
-                          "type": "array",
-                          "items": { "type": "string" }
-                        },
-                        "texto": { "type": "string" },
-                        "perguntar_voz": { "type": "boolean" }
-                      }
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "texto": { "type": "string" },
-                        "perguntar_voz": { "type": "boolean" }
-                      }
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "versiculo": { "type": "string" },
-                        "texto": { "type": "string" }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/falar": {
       "post": {
-        "summary": "Converte texto em áudio via ElevenLabs",
+        "summary": "Gera áudio TTS",
         "operationId": "falar",
         "requestBody": {
           "required": true,
@@ -133,10 +21,7 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "texto": {
-                    "type": "string",
-                    "description": "Texto a ser sintetizado"
-                  }
+                  "texto": { "type": "string" }
                 },
                 "required": ["texto"]
               }
@@ -144,27 +29,13 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "URL do áudio gerado",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "audio_url": { "type": "string" },
-                    "filename": { "type": "string" },
-                    "slug": { "type": "string" }
-                  }
-                }
-              }
-            }
-          }
+          "200": { "description": "Áudio gerado" }
         }
       }
     },
     "/transcrever": {
       "post": {
-        "summary": "Transcreve áudio com Whisper",
+        "summary": "Transcreve áudio via Whisper",
         "operationId": "transcrever",
         "requestBody": {
           "required": true,
@@ -181,36 +52,13 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "Transcrição em segmentos",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "duracao_total": { "type": "number" },
-                    "transcricao": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "inicio": { "type": "number" },
-                          "fim": { "type": "number" },
-                          "texto": { "type": "string" }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
+          "200": { "description": "Transcrição" }
         }
       }
     },
     "/gerar_csv": {
       "post": {
-        "summary": "Gera CSV/SRT/TXT e envia ao Drive",
+        "summary": "Gera CSV, SRT, TXT no Drive",
         "operationId": "gerarCsv",
         "requestBody": {
           "required": true,
@@ -219,6 +67,7 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "slug": { "type": "string" },
                   "transcricao": {
                     "type": "array",
                     "items": {
@@ -227,7 +76,8 @@
                         "inicio": { "type": "number" },
                         "fim": { "type": "number" },
                         "texto": { "type": "string" }
-                      }
+                      },
+                      "required": ["inicio", "fim", "texto"]
                     }
                   },
                   "prompts": {
@@ -236,31 +86,19 @@
                   },
                   "descricao": { "type": "string" }
                 },
-                "required": ["transcricao","prompts"]
+                "required": ["slug", "transcricao", "prompts"]
               }
             }
           }
         },
         "responses": {
-          "200": {
-            "description": "Pasta Drive criada com arquivos",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "folder_url": { "type": "string" }
-                  }
-                }
-              }
-            }
-          }
+          "200": { "description": "Arquivos gerados" }
         }
       }
     },
     "/upload_zip": {
       "post": {
-        "summary": "Faz upload de .zip de imagens e seleciona via CLIP",
+        "summary": "Upload de ZIP de imagens",
         "operationId": "uploadZip",
         "requestBody": {
           "required": true,
@@ -269,7 +107,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "zip": { "type": "string", "format": "binary" }
+                  "zip": {
+                    "type": "string",
+                    "format": "binary"
+                  }
                 },
                 "required": ["zip"]
               }
@@ -277,30 +118,13 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "Imagens processadas e selecionadas",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": { "type": "boolean" },
-                    "selecionadas": {
-                      "type": "array",
-                      "items": { "type": "string" }
-                    },
-                    "slug": { "type": "string" }
-                  }
-                }
-              }
-            }
-          }
+          "200": { "description": "Imagens processadas" }
         }
       }
     },
     "/montar_video": {
       "post": {
-        "summary": "Monta vídeo final e envia ao Drive",
+        "summary": "Monta vídeo final",
         "operationId": "montarVideo",
         "requestBody": {
           "required": true,
@@ -312,26 +136,13 @@
                   "slug": { "type": "string" },
                   "folder_id": { "type": "string" }
                 },
-                "required": ["slug","folder_id"]
+                "required": ["slug", "folder_id"]
               }
             }
           }
         },
         "responses": {
-          "200": {
-            "description": "Vídeo montado com sucesso",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": { "type": "boolean" },
-                    "video_url": { "type": "string" }
-                  }
-                }
-              }
-            }
-          }
+          "200": { "description": "Vídeo montado" }
         }
       }
     }
