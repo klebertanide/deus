@@ -60,7 +60,13 @@ def serve_audio(fn): return send_from_directory(AUDIO_DIR, fn)
 @app.route("/transcrever", methods=["POST"])
 def transcrever():
     audio_url = request.json.get("audio_url")
+    if not audio_url:
+    return jsonify({"error": "audio_url não fornecida ou inválida"}), 400
+
+try:
     audio_bytes = requests.get(audio_url).content
+except requests.exceptions.MissingSchema:
+    return jsonify({"error": "audio_url inválida, verifique a URL fornecida"}), 400
     audio_file = io.BytesIO(audio_bytes)
     audio_file.name = "audio.mp3"
 
