@@ -7,8 +7,6 @@ RUN apt-get update && apt-get install -y \
     libxext6 \
     && rm -rf /var/lib/apt/lists/*
 
-# Define diretório do projeto
-WORKDIR /app
 
 # Copia os arquivos do projeto para dentro do container
 COPY . .
