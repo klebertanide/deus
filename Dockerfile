@@ -1,22 +1,21 @@
 FROM python:3.10-slim
 
-# Instala o ffmpeg e dependências para moviepy funcionar
+# Instala ffmpeg e libs necessárias ao moviepy
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsm6 \
     libxext6 \
     && rm -rf /var/lib/apt/lists/*
 
+# Copia os arquivos para uma pasta previsível
+COPY . /project
+WORKDIR /project
 
-# Copia os arquivos do projeto para dentro do container
-COPY . .
-
-# Instala o pip atualizado e todas as dependências
-RUN pip install --no-cache-dir --upgrade pip
+# Instala as dependências do projeto
 RUN pip install --no-cache-dir -r requirements.txt
 
 ENV PORT=5000
 EXPOSE 5000
 
-# Roda o script app.py explicitamente
-ENTRYPOINT ["python3", "app.py"]
+# Executa seu script principal
+CMD ["python", "main.py"]
