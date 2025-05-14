@@ -7,10 +7,6 @@ RUN apt-get update && apt-get install -y \
     libxext6 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copia os arquivos para uma pasta previsível
-COPY . /project
-WORKDIR /project
-
 # Instala as dependências do projeto
 RUN pip install --no-cache-dir -r requirements.txt
 
