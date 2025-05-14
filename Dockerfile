@@ -1,26 +1,24 @@
-# Usa imagem leve do Python
 FROM python:3.10-slim
 
-# Instala ffmpeg e libs necessárias ao moviepy
+# Instala o ffmpeg e dependências para moviepy funcionar
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsm6 \
     libxext6 \
     && rm -rf /var/lib/apt/lists/*
 
-# Define diretório padrão
+# Define diretório do projeto
 WORKDIR /app
 
-# Copia todos os arquivos do repositório
+# Copia os arquivos do projeto para dentro do container
 COPY . .
 
-# Atualiza pip e instala dependências
+# Instala o pip atualizado e todas as dependências
 RUN pip install --no-cache-dir --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Define variáveis padrão
 ENV PORT=5000
 EXPOSE 5000
 
-# Inicia a aplicação (ajuste aqui se renomear o arquivo)
-CMD ["python", "app.py"]
+# Roda o script app.py explicitamente
+CMD ["python3", "app.py"]
