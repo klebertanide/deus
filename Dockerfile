@@ -1,6 +1,5 @@
 FROM python:3.10-slim
 
-# Instala ffmpeg e dependências do moviepy
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsm6 \
