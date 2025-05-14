@@ -1,19 +1,21 @@
 FROM python:3.10-slim
 
+# Instala ffmpeg e libs obrigatórias pro moviepy
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsm6 \
     libxext6 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copia tudo para a raiz do container
+# Copia todos os arquivos para a raiz do container
 COPY . .
 
-# Instala as dependências
+# Instala as dependências do projeto
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Define porta para Flask
 ENV PORT=5000
 EXPOSE 5000
 
-# Executa main.py na raiz
+# Executa o script principal
 CMD ["python", "main.py"]
