@@ -21,4 +21,4 @@ ENV PORT=5000
 EXPOSE 5000
 
 # Roda o script app.py explicitamente
-CMD ["python3", "app.py"]
+ENTRYPOINT ["python3", "app.py"]
