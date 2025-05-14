@@ -1,16 +1,9 @@
 Flask
 openai>=1.10.0
 requests
-moviepy==2.1.2
-numpy
-tqdm
-imageio
-imageio-ffmpeg
-decorator
 unidecode
 google-api-python-client
 google-auth
 google-auth-oauthlib
 google-auth-httplib2
 httplib2
-protobuf
