@@ -337,9 +337,17 @@ def montar_video():
     return jsonify(video_url=f"https://drive.google.com/drive/folders/{folder_id}")
 
 # ————————— Rotas estáticas —————————
-@app.route("/audio/<path:fn>")      def serve_audio(fn):    return send_from_directory(AUDIO_DIR, fn)
-@app.route("/csv/<path:fn>")        def serve_csv(fn):      return send_from_directory(CSV_DIR, fn)
-@app.route("/downloads/<path:fn>")  def serve_download(fn): return send_from_directory(FILES_DIR, fn)
+@app.route("/audio/<path:fn>")
+def serve_audio(fn):
+    return send_from_directory(AUDIO_DIR, fn)
+
+@app.route("/csv/<path:fn>")
+def serve_csv(fn):
+    return send_from_directory(CSV_DIR, fn)
+
+@app.route("/downloads/<path:fn>")
+def serve_download(fn):
+    return send_from_directory(FILES_DIR, fn)
 
 if __name__=="__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT",5000)), debug=True)
