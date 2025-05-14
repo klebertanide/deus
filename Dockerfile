@@ -23,4 +23,4 @@ ENV PORT=5000
 EXPOSE 5000
 
 # Inicia a aplicação (ajuste aqui se renomear o arquivo)
-CMD ["python", "main.py"]
+CMD ["python", "app.py"]
