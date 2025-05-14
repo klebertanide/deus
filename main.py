@@ -71,11 +71,16 @@ def elevenlabs_tts(texto):
     }
     payload = {
         "text": texto,
-        "voice_settings": {"stability": 0.4, "similarity_boost": 0.7},
-        "model_id": "eleven_monolingual_v1",
-        "voice_id": "EXAVITQu4vr4xnSDxMaL"  # troque se quiser outra voz
+        "voice_settings": {
+            "stability": 0.60,
+            "similarity_boost": 0.90,
+            "style": 0.15,
+            "use_speaker_boost": True
+        },
+        "model_id": "eleven_multilingual_v2",
+        "voice_id": "cwIsrQsWEVTols6slKYN"  # voz Abujamra
     }
-    r = requests.post("https://api.elevenlabs.io/v1/text-to-speech/EXAVITQu4vr4xnSDxMaL",
+    r = requests.post("https://api.elevenlabs.io/v1/text-to-speech/cwIsrQsWEVTols6slKYN",
                       headers=headers, json=payload)
     r.raise_for_status()
     return r.content
@@ -115,7 +120,7 @@ def transcrever():
     else:
         resp = requests.get(audio_url, timeout=60)
         resp.raise_for_status()
-        file = io.BytesIO(resp.content); file.name = "audio.mp3"
+        file = io.BytesIO(resp.content); file.name = audio_url.rsplit("/audio/", 1)[-1]
 
     try:
         srt = openai.audio.transcriptions.create(
@@ -183,9 +188,9 @@ def gerar_csv():
     with open(txt_path, "w", encoding="utf-8") as f:
         f.write(descricao.strip())
 
-    upload_arquivo_drive(csv_path, "prompts.csv", folderId, drive)
-    upload_arquivo_drive(srt_path, "legenda.srt", folderId, drive)
-    upload_arquivo_drive(txt_path, "descricao.txt", folderId, drive)
+    upload_arquivo_drive(csv_path, f"{slug}.csv", folderId, drive)
+    upload_arquivo_drive(srt_path, f"{slug}.srt", folderId, drive)
+    upload_arquivo_drive(txt_path, f"{slug}.txt", folderId, drive)
 
     return jsonify(slug=slug, folder_url=f"https://drive.google.com/drive/folders/{folderId}")
 
