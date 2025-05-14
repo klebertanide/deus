@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: deus-te-enviou
+    env: docker
+    plan: free
+    dockerfilePath: Dockerfile
+    autoDeploy: true
+    buildFilter:
+      paths:
+        - Dockerfile
+        - requirements.txt
+        - main.py
