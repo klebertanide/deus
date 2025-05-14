@@ -1,26 +1,33 @@
-# 1) Base
 FROM python:3.10-slim
 
-# 2) SO dependencies para MoviePy
+# 1) SO‐dependencies para MoviePy
 RUN apt-get update && apt-get install -y \
-    ffmpeg libsm6 libxext6 \
+    ffmpeg \
+    libsm6 \
+    libxext6 \
   && rm -rf /var/lib/apt/lists/*
 
-# 3) Define o workdir (todo o seu código ficará em /app dentro do container)
+# 2) Diretório de trabalho
 WORKDIR /app
 
-# 4) Copia apenas o requirements e instala
+# 3) Copia só o requirements e instala + debug
 COPY requirements.txt ./
-
-# Este passo deve aparecer ANTES de copiar o seu código.
 RUN pip install --upgrade pip \
  && pip install --no-cache-dir -r requirements.txt \
- && pip show moviepy        # <-- deve imprimir Name: moviepy  Version: 2.1.2
+ && echo "=== DEPENDÊNCIAS INSTALADAS ===" \
+ && pip show moviepy numpy imageio imageio-ffmpeg \
+ && echo "=== TESTE DE IMPORTAÇÃO ===" \
+ && python - << 'EOF'
+import moviepy.editor as m, numpy as np, imageio, imageio_ffmpeg
+print("MOVIEPY OK, versão:", m.__version__)
+print("NUMPY OK, versão:", np.__version__)
+print("IMAGEIO OK, versão:", imageio.__version__, imageio_ffmpeg.__version__)
+EOF
 
-# 5) Agora copia todo o restante do seu código
+# 4) Agora copia todo o seu código
 COPY . .
 
-# 6) Porta e startup
+# 5) Exposição de porta e comando de inicialização
 ENV PORT=5000
 EXPOSE 5000
 CMD ["python", "main.py"]
