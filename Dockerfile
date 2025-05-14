@@ -1,18 +1,21 @@
-FROM python:3.11-slim
+# Imagem base
+FROM python:3.10-slim
 
+# Diretório de trabalho
 WORKDIR /app
+
+# Copia os arquivos do projeto
 COPY . /app
-COPY .well-known /app/.well-known
 
-RUN apt-get update && apt-get install -y \
-      ffmpeg libsm6 libxext6 git \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN pip install --no-cache-dir \
-      https://download.pytorch.org/whl/cpu/torch-2.3.1%2Bcpu-cp311-cp311-linux_x86_64.whl \
-      torchaudio==2.3.1
-
+# Instala dependências
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Expõe a porta
 EXPOSE 5000
+
+# Variáveis de ambiente (substitua no deploy ou use .env)
+ENV FLASK_ENV=production
+ENV PORT=5000
+
+# Comando para rodar a API
 CMD ["python", "main.py"]
