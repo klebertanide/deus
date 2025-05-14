@@ -6,13 +6,14 @@ RUN apt-get update && apt-get install -y \
     libxext6 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copia os arquivos para a raiz do container
+# Copia tudo para a raiz do container
 COPY . .
 
-# Não define WORKDIR, tudo está na raiz
+# Instala as dependências
 RUN pip install --no-cache-dir -r requirements.txt
 
 ENV PORT=5000
 EXPOSE 5000
 
+# Executa main.py na raiz
 CMD ["python", "main.py"]
