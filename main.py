@@ -144,6 +144,9 @@ def transcrever():
         return jsonify(duracao_total=segmentos[-1]["fim"], transcricao=segmentos)
 
     except Exception as e:
+        print("[ERRO WHISPER]", str(e))
+        import traceback
+        traceback.print_exc()
         return jsonify(error=str(e)), 500
 
     finally:
