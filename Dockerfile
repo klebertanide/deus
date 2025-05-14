@@ -1,6 +1,6 @@
 FROM python:3.10-slim
 
-# Instala ffmpeg (necessário pro moviepy funcionar)
+# Instala ffmpeg e dependências do moviepy
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsm6 \
@@ -10,7 +10,6 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 COPY . .
 
-# Instala dependências do projeto
 RUN pip install --no-cache-dir --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
