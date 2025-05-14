@@ -8,10 +8,9 @@ google-auth-httplib2==0.2.0
 python-dotenv==1.0.1
 unidecode==1.3.8
 
-# MoviePy e dependências
 moviepy
 numpy>=1.24.0
-tqdm>=4.66.0
+tqdm
 imageio
 imageio-ffmpeg
-decorator>=5.1.1
+decorator
