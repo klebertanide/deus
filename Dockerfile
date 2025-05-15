@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 FROM python:3.10-slim
 
-# 1) Dependências de SO para ffmpeg e MoviePy
+# 1) Depêndencias SO para ffmpeg/MoviePy
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ffmpeg \
@@ -11,24 +11,21 @@ RUN apt-get update \
 
 WORKDIR /app
 
-# 2) Copia só as deps e instala
+# 2) Instala deps Python
 COPY requirements.txt ./
-
-# usa python3 -m pip para garantir coerência
 RUN python3 -m pip install --upgrade pip \
  && python3 -m pip install --no-cache-dir -r requirements.txt
 
-# 3) Validação de import: falha o build aqui se moviepy/editor não estiver disponível
+# 3) Valida imports — falha aqui no build se não encontrar moviepy.editor
 RUN python3 - << 'EOF'
 import moviepy.editor as m
 import numpy as np
 import imageio, imageio_ffmpeg
-print("✔️ Imports ok — MoviePy", m.__version__)
+print("✔️ Imports OK — MoviePy", m.__version__)
 EOF
 
-# 4) Agora copia todo o seu código
+# 4) Copia o resto do código
 COPY . .
 
 EXPOSE 5000
-# sempre use python3 
 CMD ["python3", "main.py"]
