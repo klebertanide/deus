@@ -207,7 +207,7 @@ def gerar_csv():
         neg = "low quality, overexposed, underexposed, extra limbs, missing fingers, bad anatomy, realistic style, photographic style, text"
         for seg, p in zip(transcricao, prompts):
             t = int(seg["inicio"])
-            w.writerow([t, f"{t} - {p}", "PRIVATE","9:16","ON","3.0","","TURBO",neg,"AUTO",""])
+            w.writerow([f"{t} - {p} - Rendered in vibrant watercolor style with visible brushstroke textures, layered pigment, and wet-on-wet blending effects. Edges of the paint bleed naturally, with expressive strokes and color blooms that emphasize the handcrafted, painterly feel of traditional watercolor illustrations.", "PRIVATE","9:16","ON","3.0","","TURBO",neg,"AUTO",""])
     upload_para_drive(csv_path, csv_path.name, folder_id, drive)
 
     # -------- SRT --------
