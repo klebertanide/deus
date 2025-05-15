@@ -104,15 +104,26 @@ def falar():
 def transcrever():
     data = request.get_json() or {}
     audio_file = data.get("audio_file")
+
     if not audio_file:
         return jsonify(error="campo 'audio_file' obrigatório"), 400
 
-    if os.path.exists(audio_file):
-        f = open(audio_file, "rb")
-    else:
-        resp = requests.get(audio_file, timeout=60)
-        resp.raise_for_status()
-        f = io.BytesIO(resp.content); f.name = "audio.mp3"
+    print("🟡 DEBUG /transcrever")
+    print("→ Recebido:", audio_file)
+    print("→ Arquivos locais:", os.listdir())
+
+    # Verifica se é arquivo local ou URL
+    try:
+        if os.path.exists(audio_file):
+            f = open(audio_file, "rb")
+        elif audio_file.startswith("http"):
+            resp = requests.get(audio_file, timeout=60)
+            resp.raise_for_status()
+            f = io.BytesIO(resp.content); f.name = "audio.mp3"
+        else:
+            return jsonify(error="Arquivo de áudio não encontrado"), 400
+    except Exception as e:
+        return jsonify(error="Falha ao abrir áudio", detalhe=str(e)), 500
 
     try:
         srt = openai.audio.transcriptions.create(
@@ -120,15 +131,17 @@ def transcrever():
             file=f,
             response_format="srt"
         )
+
         def parse_ts(ts):
             h, m, rest = ts.split(":")
             s, ms = rest.split(",")
-            return int(h)*3600 + int(m)*60 + int(s) + int(ms)/1000
+            return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
 
         segs = []
         for blk in srt.strip().split("\n\n"):
             lines = blk.split("\n")
-            if len(lines) < 3: continue
+            if len(lines) < 3:
+                continue
             st, en = lines[1].split(" --> ")
             txt = " ".join(lines[2:])
             segs.append({
@@ -136,9 +149,11 @@ def transcrever():
                 "fim": parse_ts(en),
                 "texto": txt
             })
+
         return jsonify(transcricao=segs)
+
     except Exception as e:
-        return jsonify(error=str(e)), 500
+        return jsonify(error="Falha ao transcrever", detalhe=str(e)), 500
     finally:
         f.close()
 
