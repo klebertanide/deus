@@ -204,7 +204,7 @@ def gerar_csv():
             "MAGIC_PROMPT","MODEL","SEED_NUMBER","RENDERING",
             "NEGATIVE_PROMPT","STYLE","COLOR_PALETTE"
         ])
-        neg = "low quality, overexposed, underexposed, extra limbs, missing fingers, bad anatomy"
+        neg = "low quality, overexposed, underexposed, extra limbs, missing fingers, bad anatomy, realistic style, photographic style"
         for seg, p in zip(transcricao, prompts):
             t = int(seg["inicio"])
             w.writerow([t, f"{t} - {p}", "PRIVATE","9:16","ON","3.0","","TURBO",neg,"AUTO",""])
