@@ -1,17 +1,18 @@
 {
   "schema_version": "v1",
-  "name_for_human": "Brilho do Sol Nascente",
-  "name_for_model": "brilho_nascente",
-  "description_for_human": "Gera narra\u00e7\u00f5es com ElevenLabs e transcreve com Whisper.",
-  "description_for_model": "Endpoints para gerar \u00e1udio TTS (ElevenLabs) e transcrever (Whisper).",
+  "name_for_human": "Deus Te Enviou Isso",
+  "name_for_model": "deus_te_enviou",
+  "description_for_human": "Gera áudios, transcreve, cria prompts e monta vídeos motivacionais.",
+  "description_for_model": "Use esta API para gerar TTS, transcrever áudio, gerar pacotes de prompts no Drive, receber ZIP de imagens e montar vídeos.",
   "auth": {
     "type": "none"
   },
   "api": {
     "type": "openapi",
-    "url": "https://brilho-sol-nascente.onrender.com/openapi.yaml"
+    "url": "https://deus-w0i8.onrender.com/openapi.yaml",
+    "is_user_authenticated": false
   },
-  "logo_url": "https://brilho-sol-nascente.onrender.com/logo.png",
-  "contact_email": "support@brilhosolnascente.com",
-  "legal_info_url": "https://brilhosolnascente.com/legal"
+  "logo_url": "https://deus-w0i8.onrender.com/logo.png",
+  "contact_email": "suporte@seudominio.com",
+  "legal_info_url": "https://seudominio.com/termos"
 }
