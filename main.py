@@ -104,34 +104,31 @@ def falar():
 def transcrever():
     data = request.get_json() or {}
     audio_file = data.get("audio_file")
-
     if not audio_file:
         return jsonify(error="campo 'audio_file' obrigatório"), 400
 
-    print("🟡 DEBUG /transcrever")
-    print("→ Recebido:", audio_file)
-    print("→ Arquivos locais:", os.listdir())
-
-    # Verifica se é arquivo local ou URL
+    # Abre o arquivo local ou baixa da URL
     try:
         if os.path.exists(audio_file):
             f = open(audio_file, "rb")
-        elif audio_file.startswith("http"):
+            f.name = audio_file  # Usa o nome real do arquivo com slug
+        else:
             resp = requests.get(audio_file, timeout=60)
             resp.raise_for_status()
-            f = io.BytesIO(resp.content); f.name = "audio.mp3"
-        else:
-            return jsonify(error="Arquivo de áudio não encontrado"), 400
+            f = io.BytesIO(resp.content)
+            f.name = audio_file.split("/")[-1]  # Garante que tenha nome com .mp3
     except Exception as e:
-        return jsonify(error="Falha ao abrir áudio", detalhe=str(e)), 500
+        return jsonify(error="falha ao acessar audio_file", detalhe=str(e)), 400
 
     try:
+        # Envia para transcrição
         srt = openai.audio.transcriptions.create(
             model="whisper-1",
             file=f,
             response_format="srt"
         )
 
+        # Função para converter timestamp
         def parse_ts(ts):
             h, m, rest = ts.split(":")
             s, ms = rest.split(",")
@@ -153,7 +150,8 @@ def transcrever():
         return jsonify(transcricao=segs)
 
     except Exception as e:
-        return jsonify(error="Falha ao transcrever", detalhe=str(e)), 500
+        return jsonify(error="erro na transcrição", detalhe=str(e)), 500
+
     finally:
         f.close()
 
