@@ -168,14 +168,34 @@ def gerar_csv():
     transcricao = data.get("transcricao", [])
     prompts     = data.get("prompts", [])
     texto_orig  = data.get("texto_original", "")
-    if not transcricao or not prompts or len(transcricao)!=len(prompts):
+    if not transcricao or not prompts or len(transcricao) != len(prompts):
         return jsonify(error="transcricao+prompts inválidos"), 400
 
-    slug     = slugify(texto_orig)
-    drive    = get_drive_service()
-    folder_id= criar_pasta_drive(slug, drive)
+    slug  = slugify(texto_orig)
+    drive = get_drive_service()
+    folder_id = criar_pasta_drive(slug, drive)
 
-    # CSV
+    # -------- gera descrição do vídeo via OpenAI --------
+    try:
+        resp = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role":"system", "content":"Você é um assistente que gera descrições concisas para vídeos motivacionais cristãos."},
+                {"role":"user", "content": f"Baseado neste texto, escreva uma descrição para o vídeo (2–3 frases):\n\n{texto_orig}"}
+            ],
+            temperature=0.7
+        )
+        descricao = resp.choices[0].message.content.strip()
+    except Exception:
+        descricao = ""  # não crítico: prossegue sem descrição
+
+    # salva em arquivo .txt também
+    txt_path = Path(f"{slug}.txt")
+    if descricao:
+        txt_path.write_text(descricao, encoding="utf-8")
+        upload_para_drive(txt_path, txt_path.name, folder_id, drive)
+
+    # -------- CSV --------
     csv_path = Path(f"{slug}.csv")
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
@@ -188,28 +208,29 @@ def gerar_csv():
         for seg, p in zip(transcricao, prompts):
             t = int(seg["inicio"])
             w.writerow([t, f"{t} - {p}", "PRIVATE","9:16","ON","3.0","","TURBO",neg,"AUTO",""])
+    upload_para_drive(csv_path, csv_path.name, folder_id, drive)
 
-    # SRT
+    # -------- SRT --------
     def fmt(s):
-        ms  = int((s%1)*1000)
-        h   = int(s//3600)
-        m   = int((s%3600)//60)
-        sec = int(s%60)
+        ms = int((s%1)*1000); h=int(s//3600); m=int((s%3600)//60); sec=int(s%60)
         return f"{h:02}:{m:02}:{sec:02},{ms:03}"
-
     srt_path = Path(f"{slug}.srt")
     with open(srt_path, "w", encoding="utf-8") as f:
         for i, seg in enumerate(transcricao, 1):
             f.write(f"{i}\n{fmt(seg['inicio'])} --> {fmt(seg['fim'])}\n{seg['texto']}\n\n")
+    upload_para_drive(srt_path, srt_path.name, folder_id, drive)
 
-    # faz upload
-    for p in (csv_path, srt_path, Path(f"{slug}.mp3")):
-        if p.exists():
-            upload_para_drive(p, p.name, folder_id, drive)
+    # também assegura envio do MP3
+    mp3 = Path(f"{slug}.mp3")
+    if mp3.exists():
+        upload_para_drive(mp3, mp3.name, folder_id, drive)
 
-    return jsonify(slug=slug, folder_id=folder_id,
-                   folder_url=f"https://drive.google.com/drive/folders/{folder_id}")
-
+    return jsonify(
+        slug=slug,
+        descricao=descricao,
+        folder_url=f"https://drive.google.com/drive/folders/{folder_id}"
+    )
+    
 @app.route("/upload_zip", methods=["POST"])
 def upload_zip():
     file = request.files.get("zip")
