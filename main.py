@@ -84,7 +84,7 @@ def elevenlabs_tts(text: str) -> bytes:
 
 @app.route("/falar", methods=["POST"])
 def falar():
-    data = request.get_json() or {}
+    data = request.get_json(force=True) or {}
     texto = data.get("texto")
     if not texto:
         return jsonify(error="campo 'texto' obrigatório"), 400
@@ -98,62 +98,68 @@ def falar():
         return jsonify(error="falha ElevenLabs", detalhe=str(e)), 500
 
     mp3_path.write_bytes(audio_bytes)
-    return jsonify(audio_file=str(mp3_path), slug=slug)
+
+    # use sempre "audio_url", apontando para o arquivo local
+    return jsonify(
+        audio_url=str(mp3_path.resolve()),  # caminho absoluto
+        slug=slug
+    )
 
 @app.route("/transcrever", methods=["POST"])
 def transcrever():
-    data = request.get_json() or {}
-    audio_file = data.get("audio_file")
-    if not audio_file:
-        return jsonify(error="campo 'audio_file' obrigatório"), 400
+    data = request.get_json(force=True) or {}
+    audio_ref = data.get("audio_url")
+    if not audio_ref:
+        return jsonify(error="campo 'audio_url' obrigatório"), 400
 
-    # Abre o arquivo local ou baixa da URL
+    # Tenta abrir localmente; se não existir, faz GET na URL
     try:
-        if os.path.exists(audio_file):
-            f = open(audio_file, "rb")
-            f.name = audio_file  # Usa o nome real do arquivo com slug
+        if os.path.exists(audio_ref):
+            fobj = open(audio_ref, "rb")
         else:
-            resp = requests.get(audio_file, timeout=60)
+            resp = requests.get(audio_ref, timeout=60)
             resp.raise_for_status()
-            f = io.BytesIO(resp.content)
-            f.name = audio_file.split("/")[-1]  # Garante que tenha nome com .mp3
+            fobj = io.BytesIO(resp.content)
+            fobj.name = Path(audio_ref).name
     except Exception as e:
-        return jsonify(error="falha ao acessar audio_file", detalhe=str(e)), 400
+        return jsonify(error="falha ao carregar áudio", detalhe=str(e)), 400
 
     try:
-        # Envia para transcrição
+        # Gera SRT via Whisper
         srt = openai.audio.transcriptions.create(
             model="whisper-1",
-            file=f,
+            file=fobj,
             response_format="srt"
         )
 
-        # Função para converter timestamp
-        def parse_ts(ts):
+        def parse_ts(ts: str) -> float:
             h, m, rest = ts.split(":")
-            s, ms = rest.split(",")
+            s, ms      = rest.split(",")
             return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
 
-        segs = []
-        for blk in srt.strip().split("\n\n"):
-            lines = blk.split("\n")
+        segmentos = []
+        for bloco in srt.strip().split("\n\n"):
+            lines = bloco.split("\n")
             if len(lines) < 3:
                 continue
-            st, en = lines[1].split(" --> ")
-            txt = " ".join(lines[2:])
-            segs.append({
-                "inicio": parse_ts(st),
-                "fim": parse_ts(en),
-                "texto": txt
+            inicio_ts, fim_ts = lines[1].split(" --> ")
+            texto_seg = " ".join(lines[2:])
+            segmentos.append({
+                "inicio": parse_ts(inicio_ts),
+                "fim":    parse_ts(fim_ts),
+                "texto":  texto_seg
             })
 
-        return jsonify(transcricao=segs)
+        return jsonify(transcricao=segmentos)
 
     except Exception as e:
-        return jsonify(error="erro na transcrição", detalhe=str(e)), 500
+        return jsonify(error="falha na transcrição", detalhe=str(e)), 500
 
     finally:
-        f.close()
+        try:
+            fobj.close()
+        except:
+            pass
 
 @app.route("/gerar_csv", methods=["POST"])
 def gerar_csv():
