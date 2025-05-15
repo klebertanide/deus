@@ -200,7 +200,7 @@ def gerar_csv():
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow([
-            "TIME","PROMPT","VISIBILITY","ASPECT_RATIO",
+            "PROMPT","VISIBILITY","ASPECT_RATIO",
             "MAGIC_PROMPT","MODEL","SEED_NUMBER","RENDERING",
             "NEGATIVE_PROMPT","STYLE","COLOR_PALETTE"
         ])
