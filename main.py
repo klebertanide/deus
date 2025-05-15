@@ -116,11 +116,13 @@ def falar():
 @app.route("/transcrever", methods=["POST"])
 def transcrever():
     data      = request.get_json(force=True) or {}
-    audio_ref = data.get("audio_url")
-    if not audio_ref:
-        return jsonify(error="campo 'audio_url' obrigatório"), 400
 
-    # abre local ou faz download
+    # aceita tanto audio_url (novo) quanto audio_file (antigo)
+    audio_ref = data.get("audio_url") or data.get("audio_file")
+    if not audio_ref:
+        return jsonify(error="campo 'audio_url' ou 'audio_file' obrigatório"), 400
+
+    # tenta abrir localmente; se não existir, faz GET na URL
     try:
         if os.path.exists(audio_ref):
             fobj = open(audio_ref, "rb")
