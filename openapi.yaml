@@ -1,17 +1,17 @@
 openapi: 3.1.0
 info:
-  title: Brilho do Sol Nascente API
-  version: "1.0.0"
-  description: |
-    API para gerar narrações com ElevenLabs e transcrever áudios usando Whisper.
+  title: DeusTeEnviouIsso API
+  version: 1.0.0
+  description: Endpoints para geração de áudio, transcrição, pacote de prompts e montagem de vídeo.
 servers:
-  - url: https://brilho-sol-nascente.onrender.com
-    description: Servidor Render (produção)
+  - url: https://deus-w0i8.onrender.com
+    description: Servidor principal
+
 paths:
   /falar:
     post:
-      summary: Gera áudio TTS
-      operationId: gerarAudio
+      operationId: falar
+      summary: Gerar TTS com ElevenLabs
       requestBody:
         required: true
         content:
@@ -21,26 +21,27 @@ paths:
               properties:
                 texto:
                   type: string
-                  description: Texto a ser narrado
-                voice_id:
-                  type: string
-                  description: ID da voz ElevenLabs
+                  description: Texto ou versículo a ser narrado
               required:
                 - texto
       responses:
-        "200":
+        '200':
           description: URL do áudio gerado
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  audio_url:
+                  audio_file:
                     type: string
+                    description: Caminho ou URL do arquivo MP3
+                  slug:
+                    type: string
+
   /transcrever:
     post:
-      summary: Transcreve áudio e devolve minutagem
-      operationId: transcreverAudio
+      operationId: transcrever
+      summary: Transcrever áudio via Whisper
       requestBody:
         required: true
         content:
@@ -48,15 +49,155 @@ paths:
             schema:
               type: object
               properties:
-                audio_url:
+                audio_file:
                   type: string
-                  description: URL do áudio a ser transcrito
+                  description: Caminho ou URL do arquivo MP3 a ser transcrito
               required:
-                - audio_url
+                - audio_file
       responses:
-        "200":
-          description: Transcrição com minutagem
+        '200':
+          description: Timestamps e transcrição
           content:
             application/json:
               schema:
                 type: object
+                properties:
+                  transcricao:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        inicio:
+                          type: number
+                        fim:
+                          type: number
+                        texto:
+                          type: string
+                  duracao_total:
+                    type: number
+
+  /gerar_csv:
+    post:
+      operationId: gerar_csv
+      summary: Gerar CSV/SRT/TXT e criar pasta no Drive
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                transcricao:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      inicio:
+                        type: number
+                      fim:
+                        type: number
+                      texto:
+                        type: string
+                prompts:
+                  type: array
+                  items:
+                    type: string
+                texto_original:
+                  type: string
+              required:
+                - transcricao
+                - prompts
+                - texto_original
+      responses:
+        '200':
+          description: Pasta criada no Drive
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slug:
+                    type: string
+                  folder_id:
+                    type: string
+                  folder_url:
+                    type: string
+
+  /proxima_etapa:
+    get:
+      operationId: proxima_etapa
+      summary: Instruções para envio do ZIP
+      responses:
+        '200':
+          description: Mensagem de transição
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mensagem:
+                    type: string
+
+  /upload_zip:
+    post:
+      operationId: upload_zip
+      summary: Receber ZIP de imagens e subir imagens ao Drive
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                slug:
+                  type: string
+                folder_id:
+                  type: string
+                zip:
+                  type: string
+                  format: binary
+              required:
+                - slug
+                - folder_id
+                - zip
+      responses:
+        '200':
+          description: Lista de imagens selecionadas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  usadas:
+                    type: array
+                    items:
+                      type: string
+
+  /montar_video:
+    post:
+      operationId: montar_video
+      summary: Montar vídeo com zoom, grão e legendas, e enviar MP4 ao Drive
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                slug:
+                  type: string
+                folder_id:
+                  type: string
+              required:
+                - slug
+                - folder_id
+      responses:
+        '200':
+          description: Link da pasta com o vídeo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  video_url:
+                    type: string
