@@ -171,11 +171,11 @@ def gerar_csv():
     if not transcricao or not prompts or len(transcricao) != len(prompts):
         return jsonify(error="transcricao+prompts inválidos"), 400
 
-    slug  = slugify(texto_orig)
-    drive = get_drive_service()
+    slug      = slugify(texto_orig)
+    drive     = get_drive_service()
     folder_id = criar_pasta_drive(slug, drive)
 
-    # -------- gera descrição do vídeo via OpenAI --------
+    # ——— Gera descrição via OpenAI ———
     try:
         resp = openai.ChatCompletion.create(
             model="gpt-4",
@@ -187,15 +187,15 @@ def gerar_csv():
         )
         descricao = resp.choices[0].message.content.strip()
     except Exception:
-        descricao = ""  # não crítico: prossegue sem descrição
+        descricao = ""
 
-    # salva em arquivo .txt também
+    # ——— Salva e envia .txt ———
     txt_path = Path(f"{slug}.txt")
     if descricao:
         txt_path.write_text(descricao, encoding="utf-8")
         upload_para_drive(txt_path, txt_path.name, folder_id, drive)
 
-    # -------- CSV --------
+    # ——— Gera e envia CSV ———
     csv_path = Path(f"{slug}.csv")
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
@@ -207,10 +207,11 @@ def gerar_csv():
         neg = "low quality, overexposed, underexposed, extra limbs, missing fingers, bad anatomy, realistic style, photographic style, text"
         for seg, p in zip(transcricao, prompts):
             t = int(seg["inicio"])
-            w.writerow([f"{t} - {p} - Rendered in vibrant watercolor style with visible brushstroke textures, layered pigment, and wet-on-wet blending effects. Edges of the paint bleed naturally, with expressive strokes and color blooms that emphasize the handcrafted, painterly feel of traditional watercolor illustrations.", "PRIVATE","9:16","ON","3.0","","TURBO",neg,"AUTO",""])
+            prompt_full = f"{t} - {p} - Rendered in vibrant watercolor style with visible brushstroke textures..."
+            w.writerow([prompt_full, "PRIVATE","9:16","ON","3.0","","TURBO",neg,"AUTO",""])
     upload_para_drive(csv_path, csv_path.name, folder_id, drive)
 
-    # -------- SRT --------
+    # ——— Gera e envia SRT ———
     def fmt(s):
         ms = int((s%1)*1000); h=int(s//3600); m=int((s%3600)//60); sec=int(s%60)
         return f"{h:02}:{m:02}:{sec:02},{ms:03}"
@@ -220,7 +221,7 @@ def gerar_csv():
             f.write(f"{i}\n{fmt(seg['inicio'])} --> {fmt(seg['fim'])}\n{seg['texto']}\n\n")
     upload_para_drive(srt_path, srt_path.name, folder_id, drive)
 
-    # também assegura envio do MP3
+    # ——— Envia também o MP3 ———
     mp3 = Path(f"{slug}.mp3")
     if mp3.exists():
         upload_para_drive(mp3, mp3.name, folder_id, drive)
@@ -233,10 +234,11 @@ def gerar_csv():
     
 @app.route("/upload_zip", methods=["POST"])
 def upload_zip():
-    file = request.files.get("zip")
-    slug = request.form.get("slug")
-    if not file or not slug:
-        return jsonify(error="zip e slug obrigatórios."), 400
+    file      = request.files.get("zip")
+    slug      = request.form.get("slug")
+    folder_id = request.form.get("folder_id")
+    if not file or not slug or not folder_id:
+        return jsonify(error="zip, slug e folder_id obrigatórios"), 400
 
     zip_path = Path(f"{slug}.zip")
     file.save(zip_path)
@@ -244,27 +246,22 @@ def upload_zip():
     with tempfile.TemporaryDirectory() as tmp:
         with zipfile.ZipFile(zip_path) as z:
             z.extractall(tmp)
-        imgs = [Path(tmp)/f for f in os.listdir(tmp)
-                if f.lower().endswith((".jpg",".png",".jpeg"))]
+        imgs = sorted(
+            [p for p in Path(tmp).iterdir() if p.suffix.lower() in (".jpg",".png",".jpeg")],
+            key=lambda p: p.stat().st_mtime
+        )
         if not imgs:
             return jsonify(error="nenhuma imagem no zip"), 400
 
-        # lê prompts do CSV
-        csv_path = Path(f"{slug}.csv")
-        prompts  = []
-        with open(csv_path, encoding="utf-8") as f:
-            rd = csv.DictReader(f)
-            for r in rd:
-                prompts.append(r["PROMPT"].split(" - ",1)[-1])
+        drive = get_drive_service()
+        imagens_info = []
+        for img_path in imgs:
+            t = int(img_path.stat().st_mtime)
+            nome_novo = f"{t}.jpg"
+            upload_para_drive(img_path, nome_novo, folder_id, drive)
+            imagens_info.append(nome_novo)
 
-        usadas = []
-        for idx, _ in enumerate(prompts):
-            img = imgs[idx % len(imgs)]
-            dst = Path(f"{slug}_{idx}_{img.name}")
-            img.rename(dst)
-            usadas.append(str(dst))
-
-    return jsonify(slug=slug, images=usadas)
+    return jsonify(slug=slug, images=imagens_info)
 
 @app.route("/montar_video", methods=["POST"])
 def montar_video():
@@ -274,8 +271,25 @@ def montar_video():
     if not slug or not folder_id:
         return jsonify(error="slug e folder_id obrigatórios"), 400
 
-    imgs = sorted(f for f in os.listdir()
-                  if f.startswith(f"{slug}_") and f.lower().endswith((".jpg",".png")))
+    # ——— Baixa imagens JPG da pasta no Drive ———
+    drive = get_drive_service()
+    resp = drive.files().list(q=f"'{folder_id}' in parents", fields="files(id,name)").execute()
+    for fmeta in resp.get("files", []):
+        name = fmeta["name"]
+        if name.lower().endswith(".jpg"):
+            req = drive.files().get_media(fileId=fmeta["id"])
+            with open(name, "wb") as f:
+                from googleapiclient.http import MediaIoBaseDownload
+                downloader = MediaIoBaseDownload(f, req)
+                done = False
+                while not done:
+                    _, done = downloader.next_chunk()
+
+    # ——— Lista imagens locais ordenadas pelo nome “TIMESTAMP.jpg” ———
+    imgs = sorted(
+        [f for f in os.listdir() if f.endswith(".jpg") and f.split(".")[0].isdigit()],
+        key=lambda x: int(Path(x).stem)
+    )
     if not imgs:
         return jsonify(error="sem imagens selecionadas"), 400
 
