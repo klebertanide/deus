@@ -2,11 +2,11 @@ openapi: 3.1.0
 info:
   title: DeusTeEnviouIsso API
   version: 1.0.0
-  description: Endpoints para geração de áudio, transcrição, pacote de prompts e montagem de vídeo.
+  description: |
+    Endpoints para geração de áudio, transcrição, pacote de prompts e montagem de vídeo.
 servers:
-  - url: https://deus-w0i8.onrender.com
+  - url: "https://deus-w0i8.onrender.com"
     description: Servidor principal
-
 paths:
   /falar:
     post:
@@ -25,16 +25,15 @@ paths:
               required:
                 - texto
       responses:
-        '200':
+        "200":
           description: URL do áudio gerado
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  audio_file:
+                  audio_url:
                     type: string
-                    description: Caminho ou URL do arquivo MP3
                   slug:
                     type: string
 
@@ -49,19 +48,21 @@ paths:
             schema:
               type: object
               properties:
-                audio_file:
+                audio_url:
                   type: string
-                  description: Caminho ou URL do arquivo MP3 a ser transcrito
+                  description: URL do áudio a ser transcrito
               required:
-                - audio_file
+                - audio_url
       responses:
-        '200':
+        "200":
           description: Timestamps e transcrição
           content:
             application/json:
               schema:
                 type: object
                 properties:
+                  duracao_total:
+                    type: number
                   transcricao:
                     type: array
                     items:
@@ -73,8 +74,6 @@ paths:
                           type: number
                         texto:
                           type: string
-                  duracao_total:
-                    type: number
 
   /gerar_csv:
     post:
@@ -102,6 +101,8 @@ paths:
                   type: array
                   items:
                     type: string
+                descricao:
+                  type: string
                 texto_original:
                   type: string
               required:
@@ -109,7 +110,7 @@ paths:
                 - prompts
                 - texto_original
       responses:
-        '200':
+        "200":
           description: Pasta criada no Drive
           content:
             application/json:
@@ -118,17 +119,15 @@ paths:
                 properties:
                   slug:
                     type: string
-                  folder_id:
-                    type: string
                   folder_url:
                     type: string
 
-  /proxima_etapa:
+  /próxima_etapa:
     get:
       operationId: proxima_etapa
       summary: Instruções para envio do ZIP
       responses:
-        '200':
+        "200":
           description: Mensagem de transição
           content:
             application/json:
@@ -141,7 +140,7 @@ paths:
   /upload_zip:
     post:
       operationId: upload_zip
-      summary: Receber ZIP de imagens e subir imagens ao Drive
+      summary: Receber ZIP de imagens e subir imagens selecionadas ao Drive
       requestBody:
         required: true
         content:
@@ -156,19 +155,19 @@ paths:
                 zip:
                   type: string
                   format: binary
-              required:
-                - slug
-                - folder_id
-                - zip
       responses:
-        '200':
+        "200":
           description: Lista de imagens selecionadas
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  usadas:
+                  slug:
+                    type: string
+                  folder_id:
+                    type: string
+                  images:
                     type: array
                     items:
                       type: string
@@ -192,7 +191,7 @@ paths:
                 - slug
                 - folder_id
       responses:
-        '200':
+        "200":
           description: Link da pasta com o vídeo
           content:
             application/json:
