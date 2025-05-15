@@ -24,11 +24,11 @@ from googleapiclient.http import MediaFileUpload
 
 app = Flask(__name__)
 
-# —————— Configuração Google Drive ——————
 GOOGLE_DRIVE_ROOT_FOLDER = "1d6RxnsYRS52oKUPGyuAfJZ00bksUUVI2"
 SERVICE_ACCOUNT_FILE = "/etc/secrets/service_account.json"
 ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 openai.api_key = os.getenv("OPENAI_API_KEY")
+
 
 def get_drive_service():
     creds = service_account.Credentials.from_service_account_file(
@@ -49,11 +49,10 @@ def criar_pasta_drive(nome, drive):
 def upload_para_drive(path: Path, nome: str, folder_id: str, drive):
     media = MediaFileUpload(str(path), resumable=True)
     drive.files().create(
-        body={"name": nome, "parents":[folder_id]},
+        body={"name": nome, "parents": [folder_id]},
         media_body=media
     ).execute()
 
-# —————— Helpers ——————
 def slugify(text: str, limit: int = 30) -> str:
     txt = unidecode.unidecode(text)
     txt = re.sub(r"[^\w\s]", "", txt)
@@ -83,11 +82,6 @@ def elevenlabs_tts(text: str) -> bytes:
     r.raise_for_status()
     return r.content
 
-# —————— Rotas ——————
-@app.route("/")
-def home():
-    return "API DeusTeEnviouIsso OK"
-
 @app.route("/falar", methods=["POST"])
 def falar():
     data = request.get_json() or {}
@@ -104,10 +98,7 @@ def falar():
         return jsonify(error="falha ElevenLabs", detalhe=str(e)), 500
 
     mp3_path.write_bytes(audio_bytes)
-    return jsonify(
-        audio_file = str(mp3_path),
-        slug=slug
-    )
+    return jsonify(audio_file=str(mp3_path), slug=slug)
 
 @app.route("/transcrever", methods=["POST"])
 def transcrever():
@@ -130,20 +121,20 @@ def transcrever():
             response_format="srt"
         )
         def parse_ts(ts):
-            h,m,rest = ts.split(":")
-            s,ms     = rest.split(",")
+            h, m, rest = ts.split(":")
+            s, ms = rest.split(",")
             return int(h)*3600 + int(m)*60 + int(s) + int(ms)/1000
 
         segs = []
         for blk in srt.strip().split("\n\n"):
             lines = blk.split("\n")
-            if len(lines)<3: continue
-            st,en = lines[1].split(" --> ")
-            txt   = " ".join(lines[2:])
+            if len(lines) < 3: continue
+            st, en = lines[1].split(" --> ")
+            txt = " ".join(lines[2:])
             segs.append({
                 "inicio": parse_ts(st),
-                "fim":    parse_ts(en),
-                "texto":  txt
+                "fim": parse_ts(en),
+                "texto": txt
             })
         return jsonify(transcricao=segs)
     except Exception as e:
@@ -158,7 +149,7 @@ def gerar_csv():
     prompts     = data.get("prompts", [])
     descricao   = data.get("descricao", "")
     texto_orig  = data.get("texto_original", "")
-    if not transcricao or not prompts or len(transcricao)!=len(prompts):
+    if not transcricao or not prompts or len(transcricao) != len(prompts):
         return jsonify(error="transcricao+prompts inválidos"), 400
 
     slug = slugify(texto_orig or descricao)
@@ -175,7 +166,7 @@ def gerar_csv():
             "NEGATIVE","STYLE","PALETTE"
         ])
         neg = "low quality, overexposed, underexposed, extra limbs, missing fingers, bad anatomy"
-        for seg,p in zip(transcricao, prompts):
+        for seg, p in zip(transcricao, prompts):
             t = int(seg["inicio"])
             w.writerow([t, f"{t} - {p}", "PRIVATE","9:16","ON","3.0","","TURBO",neg,"AUTO",""])
 
@@ -185,10 +176,9 @@ def gerar_csv():
         return f"{h:02}:{m:02}:{sec:02},{ms:03}"
     srt_path = Path(f"{slug}.srt")
     with open(srt_path, "w", encoding="utf-8") as f:
-        for i,seg in enumerate(transcricao,1):
+        for i, seg in enumerate(transcricao, 1):
             f.write(f"{i}\n{fmt(seg['inicio'])} --> {fmt(seg['fim'])}\n{seg['texto']}\n\n")
 
-    # Upload tudo
     for p in (csv_path, srt_path, Path(f"{slug}.mp3")):
         if p.exists():
             upload_para_drive(p, p.name, folder_id, drive)
@@ -221,7 +211,7 @@ def upload_zip():
                 prompts.append(r["PROMPT"].split(" - ",1)[-1])
 
         selecionadas = []
-        for idx,prompt in enumerate(prompts):
+        for idx, prompt in enumerate(prompts):
             img = imgs[idx % len(imgs)]
             nome = f"{slug}_{idx}_{img.name}"
             dst = Path(nome)
@@ -238,62 +228,53 @@ def montar_video():
     if not slug or not folder_id:
         return jsonify(error="slug e folder_id obrigatórios"), 400
 
-    # seleciona imagens
     imgs = sorted([f for f in os.listdir() if f.startswith(f"{slug}_") and f.lower().endswith((".jpg",".png"))])
     if not imgs:
         return jsonify(error="sem imagens selecionadas"), 400
 
-    # áudio
     audio_path = Path(f"{slug}.mp3")
     if not audio_path.exists():
         return jsonify(error="áudio não encontrado"), 400
     audio = AudioFileClip(str(audio_path))
 
-    # transcrição
     srt_path = Path(f"{slug}.srt")
     segs = []
     with open(srt_path, encoding="utf-8") as f:
         for blk in f.read().strip().split("\n\n"):
             lines = blk.split("\n")
-            if len(lines)>=3:
-                st,en = lines[1].split(" --> ")
-                segs.append({"inicio":0,"fim":3,"texto":lines[2]})
+            if len(lines) >= 3:
+                st, en = lines[1].split(" --> ")
+                segs.append({"inicio": 0, "fim": 3, "texto": lines[2]})
 
-    # compõe clipes de imagem + texto
     clips = []
-    for idx,seg in enumerate(segs):
+    for idx, seg in enumerate(segs):
         dur = seg["fim"] - seg["inicio"]
         img_clip = ImageClip(imgs[idx % len(imgs)]).resize(height=720).crop(x_center="center", width=1280).set_duration(dur)
         zoom = img_clip.resize(lambda t: 1+0.02*t)
-        txt  = TextClip(seg["texto"], fontsize=60, color="white", stroke_color="black", stroke_width=2, method="caption")\
-               .set_duration(dur).set_position(("center","bottom"))
-        comp = CompositeVideoClip([zoom, txt], size=(1280,720))
+        txt = TextClip(seg["texto"], fontsize=60, color="white", stroke_color="black", stroke_width=2, method="caption")\
+              .set_duration(dur).set_position(("center", "bottom"))
+        comp = CompositeVideoClip([zoom, txt], size=(1280, 720))
         clips.append(comp)
 
     base = concatenate_videoclips(clips).set_audio(audio)
     total_dur = base.duration
 
-    # overlay de efeitos
-    overlay = VideoFileClip("sobrepor.mp4").resize((1280,720))\
-              .set_opacity(0.2).set_duration(total_dur)
-
-    # watermark até antes do fechamento
-    closing_dur = 3  # segundos do fechamento.png
-    watermark = ImageClip("sobrepor.png").set_duration(total_dur - closing_dur)\
-                .set_position(("center","center"))
-
-    # fechamento final
-    closing = ImageClip("fechamento.png").set_duration(closing_dur)\
-               .set_start(total_dur - closing_dur).set_position(("center","center"))
+    overlay = VideoFileClip("sobrepor.mp4").resize((1280,720)).set_opacity(0.2).set_duration(total_dur)
+    closing_dur = 3
+    watermark = ImageClip("sobrepor.png").set_duration(total_dur - closing_dur).set_position(("center","center"))
+    closing = ImageClip("fechamento.png").set_duration(closing_dur).set_start(total_dur - closing_dur).set_position(("center","center"))
 
     final = CompositeVideoClip([base, overlay, watermark, closing], size=(1280,720))
     outp = Path(f"{slug}.mp4")
     final.write_videofile(str(outp), fps=24, codec="libx264", audio_codec="aac")
 
-    # envia para o Drive
     drive = get_drive_service()
     upload_para_drive(outp, outp.name, folder_id, drive)
     return jsonify(video_url=f"https://drive.google.com/drive/folders/{folder_id}")
+
+@app.route("/")
+def home():
+    return "API DeusTeEnviouIsso OK"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=True)
