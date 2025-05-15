@@ -1,7 +1,6 @@
-# Use a imagem oficial Python slim
 FROM python:3.10-slim
 
-# 1) Instala dependências de SO necessárias ao MoviePy/FFMPEG
+# 1) SO-deps para MoviePy/ffmpeg
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ffmpeg \
@@ -9,20 +8,17 @@ RUN apt-get update \
       libxext6 \
  && rm -rf /var/lib/apt/lists/*
 
-# 2) Define diretório de trabalho
 WORKDIR /app
 
-# 3) Copia só o requirements e instala as libs Python
+# 2) Instala só as libs Python
 COPY requirements.txt ./
 RUN pip install --upgrade pip \
  && pip install --no-cache-dir -r requirements.txt
 
-# 4) Copia todo o seu código para dentro do container
+# 3) Copia o código
 COPY . .
 
-# 5) Exponha a porta usada pela sua Flask app
+# 4) Expõe porta e inicia
 ENV PORT=5000
 EXPOSE 5000
-
-# 6) Comando padrão para iniciar a API
 CMD ["python", "main.py"]
