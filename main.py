@@ -2,23 +2,25 @@ import os
 import io
 import csv
 import re
-import uuid
 import zipfile
+import time
 import requests
 import unidecode
-import tempfile
-import shutil
-import ffmpeg
+import numpy as np
 from pathlib import Path
 from flask import Flask, request, jsonify, send_from_directory
 import openai
+from moviepy.editor import (
+    AudioFileClip, ImageClip, TextClip, CompositeVideoClip,
+    concatenate_videoclips, VideoFileClip
+)
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 app = Flask(__name__)
 
-# — Configurações de pastas —
+# ——————————————— Configurações de pastas ———————————————
 BASE       = Path(".")
 AUDIO_DIR  = BASE / "audio"
 CSV_DIR    = BASE / "csv"
@@ -30,7 +32,7 @@ GOOGLE_DRIVE_FOLDER_ID = "1d6RxnsYRS52oKUPGyuAfJZ00bksUUVI2"
 ELEVEN_API_KEY        = os.getenv("ELEVENLABS_API_KEY")
 openai.api_key        = os.getenv("OPENAI_API_KEY")
 
-# — Helpers de Drive —
+# ——————————————— Helpers ———————————————
 def get_drive_service():
     creds = service_account.Credentials.from_service_account_file(
         "/etc/secrets/service_account.json",
@@ -45,15 +47,21 @@ def criar_pasta_drive(nome, drive):
     return folder['id']
 
 def upload_arquivo_drive(path, nome, folder_id, drive):
-    meta = {'name': nome, 'parents': [folder_id]}
+    meta  = {'name': nome, 'parents': [folder_id]}
     media = MediaFileUpload(str(path), resumable=True)
     drive.files().create(body=meta, media_body=media).execute()
 
-# — Outros Helpers —
 def slugify(text, limit=30):
     txt = unidecode.unidecode(text)
     txt = re.sub(r"[^\w\s]", "", txt)
     return txt.strip().replace(" ", "_").lower()[:limit]
+
+def format_ts(seconds):
+    ms = int((seconds % 1) * 1000)
+    h  = int(seconds // 3600)
+    m  = int((seconds % 3600) // 60)
+    s  = int(seconds % 60)
+    return f"{h:02}:{m:02}:{s:02},{ms:03}"
 
 def elevenlabs_tts(text):
     headers = {"xi-api-key": ELEVEN_API_KEY, "Content-Type": "application/json"}
@@ -75,7 +83,7 @@ def elevenlabs_tts(text):
     r.raise_for_status()
     return r.content
 
-# — Rotas públicas —
+# ——————————————— Rotas básicas ———————————————
 @app.route("/")
 def home():
     return "API DeusTeEnviouIsso OK"
@@ -92,7 +100,7 @@ def serve_csv(fn):
 def serve_download(fn):
     return send_from_directory(FILES_DIR, fn)
 
-# — /falar — gera MP3 com ElevenLabs —
+# ——————————————— /falar ———————————————
 @app.route("/falar", methods=["POST"])
 def falar():
     data  = request.get_json() or {}
@@ -118,7 +126,7 @@ def falar():
         slug      = slug
     )
 
-# — /transcrever — usa Whisper para SRT e JSON —
+# ——————————————— /transcrever ———————————————
 @app.route("/transcrever", methods=["POST"])
 def transcrever():
     data      = request.get_json() or {}
@@ -126,6 +134,7 @@ def transcrever():
     if not audio_url:
         return jsonify(error="campo 'audio_url' obrigatório"), 400
 
+    # carrega mp3 local ou remoto
     if audio_url.startswith(request.url_root.rstrip("/")):
         fname = audio_url.rsplit("/audio/",1)[-1]
         file  = open(AUDIO_DIR / fname, "rb")
@@ -138,15 +147,14 @@ def transcrever():
         srt = openai.audio.transcriptions.create(
             model="whisper-1", file=file, response_format="srt"
         )
-
         def parse_ts(ts):
             h,m,rest = ts.split(":")
             s,ms     = rest.split(",")
             return int(h)*3600 + int(m)*60 + int(s) + int(ms)/1000
 
         segs = []
-        for bloco in srt.strip().split("\n\n"):
-            lines = bloco.split("\n")
+        for blk in srt.strip().split("\n\n"):
+            lines = blk.split("\n")
             if len(lines)<3: continue
             st, en = lines[1].split(" --> ")
             txt    = " ".join(lines[2:])
@@ -159,7 +167,7 @@ def transcrever():
         try: file.close()
         except: pass
 
-# — /gerar_csv — prepara CSV, SRT, TXT e faz upload —
+# ——————————————— /gerar_csv ———————————————
 @app.route("/gerar_csv", methods=["POST"])
 def gerar_csv():
     data           = request.get_json() or {}
@@ -180,28 +188,29 @@ def gerar_csv():
     txt_path = FILES_DIR / f"{slug}.txt"
     mp3_path = AUDIO_DIR / f"{slug}.mp3"
 
-    # CSV
+    # gera CSV
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["TIME","PROMPT","VISIBILITY","ASPECT_RATIO","MAGIC_PROMPT","MODEL","SEED","RENDERING","NEGATIVE","STYLE","PALETTE"])
+        w.writerow([
+            "TIME","PROMPT","VISIBILITY","ASPECT_RATIO",
+            "MAGIC_PROMPT","MODEL","SEED","RENDERING",
+            "NEGATIVE","STYLE","PALETTE"
+        ])
         neg = "low quality, overexposed, underexposed, extra limbs, missing fingers, bad anatomy"
-        for seg,p in zip(transcricao,prompts):
+        for seg,p in zip(transcricao, prompts):
             t = int(seg["inicio"])
             w.writerow([t, f"{t} - {p}", "PRIVATE","9:16","ON","3.0","","TURBO",neg,"AUTO",""])
 
-    # SRT
-    def format_ts(s):
-        ms = int((s%1)*1000); h=int(s//3600); m=int((s%3600)//60); sec=int(s%60)
-        return f"{h:02}:{m:02}:{sec:02},{ms:03}"
+    # gera SRT
     with open(srt_path, "w", encoding="utf-8") as f:
         for i,seg in enumerate(transcricao,1):
             f.write(f"{i}\n{format_ts(seg['inicio'])} --> {format_ts(seg['fim'])}\n{seg['texto']}\n\n")
 
-    # TXT
+    # gera TXT
     with open(txt_path, "w", encoding="utf-8") as f:
         f.write(descricao.strip())
 
-    # Uploads
+    # envia para Drive
     upload_arquivo_drive(csv_path, f"{slug}.csv", folderId, drive)
     upload_arquivo_drive(srt_path, f"{slug}.srt", folderId, drive)
     upload_arquivo_drive(txt_path, f"{slug}.txt", folderId, drive)
@@ -210,13 +219,14 @@ def gerar_csv():
 
     return jsonify(slug=slug, folder_url=f"https://drive.google.com/drive/folders/{folderId}")
 
-# — /upload_zip — descompacta ZIP de imagens —
+# ——————————————— /upload_zip ———————————————
 @app.route("/upload_zip", methods=["POST"])
 def upload_zip():
     file = request.files.get("zip")
     if not file:
         return jsonify(error="Campo 'zip' obrigatório."), 400
 
+    # detecta única pasta de imagens
     projs = [p for p in FILES_DIR.iterdir() if p.is_dir()]
     if len(projs)!=1:
         return jsonify(error="Espere uma única pasta de projeto."), 400
@@ -227,7 +237,8 @@ def upload_zip():
 
     zip_path = tmp/"imgs.zip"
     file.save(zip_path)
-    with zipfile.ZipFile(zip_path) as z: z.extractall(tmp)
+    with zipfile.ZipFile(zip_path) as z:
+        z.extractall(tmp)
 
     imgs = [f for f in tmp.iterdir() if f.suffix.lower() in (".jpg",".jpeg",".png")]
     if not imgs:
@@ -243,9 +254,9 @@ def upload_zip():
         for r in reader:
             prompts.append(r["PROMPT"].split(" - ",1)[-1])
 
-    # placeholder de seleção: sempre a primeira imagem
+    # placeholder: só pega a primeira de cada
     selecionadas = []
-    for idx,p in enumerate(prompts):
+    for idx,_ in enumerate(prompts):
         img = imgs[0]
         dst = out / f"{idx:02d}_{img.name}"
         img.rename(dst)
@@ -253,102 +264,93 @@ def upload_zip():
 
     return jsonify(ok=True, slug=slug, usadas=selecionadas)
 
-# — /montar_video — gera e faz upload do MP4 final —
+# ——————————————— /montar_video ———————————————
 @app.route("/montar_video", methods=["POST"])
 def montar_video():
     data      = request.get_json(force=True) or {}
     slug      = data.get("slug")
     folder_id = data.get("folder_id")
+    if not slug or not folder_id:
+        return jsonify(error="slug e folder_id obrigatórios"), 400
 
-    try:
-        # 1) Carrega SRT
-        srt_path = FILES_DIR / f"{slug}.srt"
-        def parse_ts(ts):
-            h,m,rest = ts.split(":"); s,ms = rest.split(",")
-            return int(h)*3600 + int(m)*60 + int(s) + int(ms)/1000
+    # carrega segmentos da SRT
+    srt_path = FILES_DIR / f"{slug}.srt"
+    if not srt_path.exists():
+        return jsonify(error="Legenda não encontrada."), 400
+    segmentos=[]
+    with open(srt_path, encoding="utf-8") as f:
+        for bloco in f.read().split("\n\n"):
+            lines = bloco.split("\n")
+            if len(lines)>=3:
+                t1,t2 = lines[1].split(" --> ")
+                # simplificado: só usa texto e duração
+                dur = None  # será ajustado abaixo
+                textos = lines[2]
+                inicio = None  # não usado diretamente
+                segmentos.append({"texto": textos})
 
-        segmentos = []
-        with open(srt_path, encoding="utf-8") as f:
-            for blk in f.read().strip().split("\n\n"):
-                lines = blk.split("\n")
-                if len(lines)>=3:
-                    st,en = lines[1].split(" --> ")
-                    txt   = lines[2]
-                    segmentos.append({
-                        "inicio": parse_ts(st),
-                        "fim":    parse_ts(en),
-                        "texto":  txt
-                    })
+    # carrega áudio
+    mp3_path = AUDIO_DIR / f"{slug}.mp3"
+    if not mp3_path.exists():
+        return jsonify(error="Áudio não encontrado."), 400
+    audio_clip = AudioFileClip(str(mp3_path))
 
-        # 2) Lista de imagens
-        img_dir = FILES_DIR / slug
-        imagens = sorted([p for p in img_dir.iterdir() if p.suffix.lower() in (".jpg",".jpeg",".png")])
-        if not imagens:
-            return jsonify(error="Sem imagens."), 400
+    # gera clipes de imagem+texto
+    clips = []
+    for idx,seg in enumerate(segmentos):
+        # placeholder: cada segmento com 3s
+        dur = 3
+        img_path = FILES_DIR / slug / sorted((FILES_DIR/slug).iterdir())[idx % len(list((FILES_DIR/slug).iterdir()))].name
+        img_clip = ImageClip(str(img_path))\
+            .resize(height=720)\
+            .crop(x_center="center", width=1280)\
+            .set_duration(dur)
+        txt_clip = TextClip(seg["texto"], fontsize=50, color="white", stroke_color="black", stroke_width=2, method="caption")\
+            .set_duration(dur).set_position(("center","bottom"))
+        clips.append(CompositeVideoClip([img_clip, txt_clip], size=(1280,720)))
 
-        # 3) Cria vídeos temporários para cada segmento
-        tmpdir = Path(tempfile.mkdtemp(prefix="seg_"))
-        seg_files = []
-        for i,seg in enumerate(segmentos):
-            dur = seg["fim"] - seg["inicio"]
-            img = imagens[i%len(imagens)]
-            out_seg = tmpdir/f"seg_{i}.mp4"
+    main_video = concatenate_videoclips(clips)
+    main_video = main_video.set_audio(audio_clip)
+    main_duration = main_video.duration
 
-            (
-                ffmpeg
-                .input(str(img), loop=1, t=dur, framerate=24)
-                .filter('zoompan',
-                        z="zoom+0.001",   # zoom incremental
-                        d=int(dur*24),   # frames = duration * fps
-                        s="1280x720")
-                .filter('drawtext',
-                        text=seg["texto"],
-                        fontfile="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                        fontsize=60,
-                        fontcolor="white",
-                        x="(w-text_w)/2",
-                        y="h-text_h-20",
-                        shadowcolor="black",
-                        shadowx=2,
-                        shadowy=2)
-                .filter('noise', 'alls', '20')  # granulação leve
-                .output(str(out_seg), vcodec='libx264', pix_fmt='yuv420p')
-                .overwrite_output()
-                .run(quiet=True)
-            )
-            seg_files.append(str(out_seg))
+    # camada de efeitos (sobrepor.mp4) e marca d'água (sobrepor.png)
+    overlay_fx = VideoFileClip("sobrepor.mp4")\
+        .resize((1280,720))\
+        .set_duration(main_duration + 3)\
+        .set_opacity(0.2)
 
-        # 4) Monta arquivo de concat
-        concat_txt = tmpdir/"concat.txt"
-        with open(concat_txt, "w") as f:
-            for p in seg_files:
-                f.write(f"file '{p}'\n")
+    watermark = ImageClip("sobrepor.png")\
+        .resize((1280,720))\
+        .set_duration(main_duration)
 
-        # 5) Concatena vídeo e adiciona áudio
-        mp3_path = AUDIO_DIR / f"{slug}.mp3"
-        final_out = FILES_DIR / f"{slug}.mp4"
+    # imagem de fechamento (3s)
+    closing_img = ImageClip("fechamento.png")\
+        .resize((1280,720))\
+        .set_duration(3)
 
-        video_in = ffmpeg.input(str(concat_txt), format='concat', safe=0)
-        audio_in = ffmpeg.input(str(mp3_path))
-        (
-            ffmpeg
-            .output(video_in.video, audio_in.audio, str(final_out),
-                    vcodec='libx264', acodec='aac', strict='experimental')
-            .overwrite_output()
-            .run(quiet=True)
-        )
+    # composições
+    main_composite = CompositeVideoClip([
+        main_video,
+        overlay_fx.subclip(0, main_duration),
+        watermark
+    ], size=(1280,720))
 
-        # 6) Upload final
-        drive = get_drive_service()
-        upload_arquivo_drive(final_out, f"{slug}.mp4", folder_id, drive)
+    closing_composite = CompositeVideoClip([
+        closing_img,
+        overlay_fx.subclip(main_duration, main_duration + 3)
+    ], size=(1280,720))
 
-        # limpa temporários
-        shutil.rmtree(tmpdir)
+    final = concatenate_videoclips([main_composite, closing_composite])
+    final = final.set_audio(audio_clip)
 
-        return jsonify(video_url=f"https://drive.google.com/drive/folders/{folder_id}")
+    outp = FILES_DIR / f"{slug}.mp4"
+    final.write_videofile(str(outp), fps=24, codec="libx264", audio_codec="aac")
 
-    except Exception as e:
-        return jsonify(error=str(e)), 500
+    # envia vídeo final ao Drive
+    drive = get_drive_service()
+    upload_arquivo_drive(outp, f"{slug}.mp4", folder_id, drive)
 
-if __name__=="__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT",5000)), debug=True)
+    return jsonify(video_url=f"https://drive.google.com/drive/folders/{folder_id}")
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)), debug=True)
