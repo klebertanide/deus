@@ -228,20 +228,28 @@ def gerar_csv():
 
     # — Gera CSV (.csv) —
     csv_path = Path(f"{slug}.csv")
-    neg = ("low quality, overexposed, underexposed, extra limbs, missing fingers, "
-           "bad anatomy, realistic style, photographic style, text")
+    neg = (
+        "low quality, overexposed, underexposed, extra limbs, missing fingers, "
+        "bad anatomy, realistic style, photographic style, text"
+    )
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow([
-            "TIME","PROMPT","VISIBILITY","ASPECT_RATIO",
-            "MAGIC_PROMPT","MODEL","SEED_NUMBER","RENDERING",
-            "NEGATIVE_PROMPT","STYLE","COLOR_PALETTE"
-        ])
+            "PROMPT", "VISIBILITY", "ASPECT_RATIO",
+            "MAGIC_PROMPT", "MODEL", "SEED_NUMBER",
+            "RENDERING", "NEGATIVE_PROMPT",
+            "STYLE", "COLOR_PALETTE", "Num_images"
+    ])
         for seg, p in zip(transcricao, prompts):
             t = int(seg["inicio"])
-            prompt_full = f"{p} {aquarela_info}"
-            w.writerow([t, prompt_full, "PRIVATE","9:16","ON","3.0","","TURBO", neg, "AUTO", ""])
+            prompt_full = f"{t} {p} {aquarela_info}"
+            w.writerow([
+                prompt_full,
+                "PRIVATE", "9:16", "ON", "3.0", "",
+                "TURBO", neg, "AUTO", "", "4"
+               ])
     upload_para_drive(csv_path, csv_path.name, folder_id, drive)
+    
 
     # — Gera SRT (.srt) —
     def fmt(s):
