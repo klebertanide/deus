@@ -181,6 +181,13 @@ def transcrever():
 
 @app.route("/gerar_csv", methods=["POST"])
 def gerar_csv():
+    aquarela_info = (
+        "A imagem deve parecer uma pintura tradicional em aquarela, com foco em: "
+        "Texturas suaves, como papel artesanal levemente poroso. "
+        "Pinceladas visíveis e fluidas, com bordas levemente borradas. "
+        "Cores vivas, mas com equilíbrio e transparência. "
+        "Sensação de arte feita à mão."
+    )
     data        = request.get_json() or {}
     transcricao = data.get("transcricao", [])
     prompts     = data.get("prompts", [])
@@ -226,7 +233,8 @@ def gerar_csv():
         ])
         for seg, p in zip(transcricao, prompts):
             t = int(seg["inicio"])
-            w.writerow([t, p, "PRIVATE","9:16","ON","3.0","","TURBO", neg, "AUTO", ""])
+                prompt_full = f"{p} {aquarela_info}"
+            w.writerow([t, prompt_full, "PRIVATE","9:16","ON","3.0","","TURBO", neg, "AUTO", ""])
     upload_para_drive(csv_path, csv_path.name, folder_id, drive)
 
     # — Gera SRT (.srt) —
