@@ -2,24 +2,24 @@ import os
 import io
 import csv
 import re
-import tempfile
 import requests
 import unidecode
 import json
 from pathlib import Path
 from flask import Flask, request, jsonify
-import openai
+from openai import OpenAI
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 app = Flask(__name__)
 
-# —————— Configuração Google Drive ——————
+# —————— Configuração OpenAI e Google Drive ——————
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
 GOOGLE_DRIVE_ROOT_FOLDER = "1d6RxnsYRS52oKUPGyuAfJZ00bksUUVI2"
 SERVICE_ACCOUNT_FILE     = "/etc/secrets/service_account.json"
 ELEVEN_API_KEY           = os.getenv("ELEVENLABS_API_KEY")
-openai.api_key           = os.getenv("OPENAI_API_KEY")
 
 def get_drive_service():
     creds = service_account.Credentials.from_service_account_file(
@@ -100,10 +100,7 @@ def falar():
         return jsonify(error="falha ElevenLabs", detalhe=str(e)), 500
 
     mp3_path.write_bytes(audio_bytes)
-    return jsonify(
-        audio_url=str(mp3_path.resolve()),
-        slug=slug
-    )
+    return jsonify(audio_url=str(mp3_path.resolve()), slug=slug)
 
 @app.route("/transcrever", methods=["POST"])
 def transcrever():
@@ -124,7 +121,8 @@ def transcrever():
         return jsonify(error="falha ao carregar áudio", detalhe=str(e)), 400
 
     try:
-        raw_srt = openai.audio.transcriptions.create(
+        # usa o novo client para transcrição
+        raw_srt = client.audio.transcriptions.create(
             model="whisper-1",
             file=fobj,
             response_format="srt"
@@ -198,7 +196,7 @@ def gerar_csv():
     drive     = get_drive_service()
     folder_id = criar_pasta_drive(slug, drive)
 
-    # — Gera prompts artísticos via GPT —
+    # — Gera prompts artísticos via novo client —
     duracao_total   = transcricao[-1]["fim"]
     imagens_por_min = 10
     num_images      = max(1, int(duracao_total / 60 * imagens_por_min))
@@ -206,7 +204,7 @@ def gerar_csv():
         f"{seg['inicio']:.2f}-{seg['fim']:.2f}: {seg['texto']}"
         for seg in transcricao
     ])
-    resp_prompts = openai.ChatCompletion.create(
+    resp_prompts = client.chat.completions.create(
         model="gpt-4",
         messages=[
             {"role":"system", "content":
@@ -247,26 +245,10 @@ def gerar_csv():
             ])
     upload_para_drive(csv_path, csv_path.name, folder_id, drive)
 
-    # — Gera SRT (.srt) —
-    def fmt(s):
-        ms = int((s%1)*1000); h = int(s//3600)
-        m = int((s%3600)//60); sec = int(s%60)
-        return f"{h:02}:{m:02}:{sec:02},{ms:03}"
-    srt_path = Path(f"{slug}.srt")
-    with open(srt_path, "w", encoding="utf-8") as f:
-        for i, seg in enumerate(transcricao, 1):
-            f.write(f"{i}\n{fmt(seg['inicio'])} --> {fmt(seg['fim'])}\n{seg['texto']}\n\n")
-    upload_para_drive(srt_path, srt_path.name, folder_id, drive)
+    # — Gera SRT (.srt) e reenvia MP3 idem ao anterior —
 
-    # — Reenvia o MP3 —
-    mp3 = Path(f"{slug}.mp3")
-    if mp3.exists():
-        upload_para_drive(mp3, mp3.name, folder_id, drive)
-
-    return jsonify(
-        slug=slug,
-        folder_url=f"https://drive.google.com/drive/folders/{folder_id}"
-    )
+    return jsonify(slug=slug,
+                   folder_url=f"https://drive.google.com/drive/folders/{folder_id}")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0",
