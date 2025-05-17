@@ -233,7 +233,7 @@ def gerar_csv():
         ])
         for seg, p in zip(transcricao, prompts):
             t = int(seg["inicio"])
-                prompt_full = f"{p} {aquarela_info}"
+            prompt_full = f"{p} {aquarela_info}"
             w.writerow([t, prompt_full, "PRIVATE","9:16","ON","3.0","","TURBO", neg, "AUTO", ""])
     upload_para_drive(csv_path, csv_path.name, folder_id, drive)
 
