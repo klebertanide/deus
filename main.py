@@ -176,7 +176,46 @@ def transcrever():
         try: fobj.close()
         except: pass
 
-@app.route("/gerar_csv", methods=["POST"])
+
+@app.route("/gerar_csv", methods=["POST"])   
+    with open(csv_path, "w", ...) as f:
+        # ... seu loop de escrita ...
+    upload_para_drive(csv_path, csv_path.name, folder_id, drive)
+
+    # — Gera SRT (.srt) e envia —
+    def fmt(s):
+        ms = int((s%1)*1000); h = int(s//3600)
+        m = int((s%3600)//60); sec = int(s%60)
+        return f"{h:02}:{m:02}:{sec:02},{ms:03}"
+
+    srt_path = Path(f"{slug}.srt")
+    with open(srt_path, "w", encoding="utf-8") as f:
+        for i, seg in enumerate(transcricao, 1):
+            f.write(f"{i}\n{fmt(seg['inicio'])} --> {fmt(seg['fim'])}\n{seg['texto']}\n\n")
+    upload_para_drive(srt_path, srt_path.name, folder_id, drive)
+
+    # — Reenvia o MP3 (se existir) —
+    mp3 = Path(f"{slug}.mp3")
+    if mp3.exists():
+        upload_para_drive(mp3, mp3.name, folder_id, drive)
+
+    # ← agora sim retornamos só depois de tudo enviado
+    return jsonify(
+        slug=slug,
+        folder_url=f"https://drive.google.com/drive/folders/{folder_id}"
+    )
+
+    # — Reenvia o MP3 (se existir) —
+    mp3 = Path(f"{slug}.mp3")
+    if mp3.exists():
+        upload_para_drive(mp3, mp3.name, folder_id, drive)
+
+    # ← agora sim retornamos só depois de tudo enviado
+    return jsonify(
+        slug=slug,
+        folder_url=f"https://drive.google.com/drive/folders/{folder_id}"
+    )
+
 def gerar_csv():
     aquarela_info = (
         "A imagem deve parecer uma pintura tradicional em aquarela, com foco em: "
@@ -198,7 +237,7 @@ def gerar_csv():
 
     # — Gera prompts artísticos via novo client —
     duracao_total   = transcricao[-1]["fim"]
-    imagens_por_min = 10
+    imagens_por_min = 8
     num_images      = max(1, int(duracao_total / 60 * imagens_por_min))
     resumo_ts = "\n".join([
         f"{seg['inicio']:.2f}-{seg['fim']:.2f}: {seg['texto']}"
@@ -212,7 +251,7 @@ def gerar_csv():
             {"role":"user", "content":
              f"Dada esta transcrição com tempos (em segundos):\n\n{resumo_ts}\n\n"
              f"Gere exatamente {num_images} prompts de ilustração em português, "
-             "de forma artística, cobrindo todo o conteúdo sem espaços em branco. "
+             "de forma artística, deve inspirar, tocar o coração e gerar vontade de compartilhar, cobrindo todo o conteúdo sem espaços em branco. "
              "Responda SOMENTE um JSON no formato:\n"
              "[{{\"t\": número_de_segundos, \"prompt\": \"descrição da imagem\"}}, ...]"}
         ],
@@ -234,10 +273,13 @@ def gerar_csv():
             "RENDERING", "NEGATIVE_PROMPT",
             "STYLE", "COLOR_PALETTE", "Num_images"
         ])
+
         for item in prompts_data:
-            t = item["t"]
+            # arredonda e pega só o inteiro
+            segundos = int(round(item["t"]))
             p = item["prompt"]
-            prompt_full = f"t({t}) {p} {aquarela_info}"
+            # remove o “t()” e usa só o número
+            prompt_full = f"{segundos} {p} {aquarela_info}"
             w.writerow([
                 prompt_full,
                 "PRIVATE", "9:16", "ON", "3.0", "",
