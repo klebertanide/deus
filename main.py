@@ -196,7 +196,7 @@ def gerar_csv():
 
     # — Gera prompts artísticos via novo client —
     duracao_total   = transcricao[-1]["fim"]
-    imagens_por_min = 8
+    imagens_por_min = 20
     num_images      = max(1, int(duracao_total / 60 * imagens_por_min))
     resumo_ts = "\n".join([
         f"{seg['inicio']:.2f}-{seg['fim']:.2f}: {seg['texto']}"
