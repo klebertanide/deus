@@ -129,7 +129,7 @@ def transcrever():
             file=fobj,
             response_format="srt"
         )
-        # reagrupa cada ~3 palavras em seu próprio bloco SRT
+        # reagrupa cada ~4 palavras em seu próprio bloco SRT
         orig_blocks = []
         for blk in raw_srt.strip().split("\n\n"):
             parts = blk.split("\n")
@@ -142,14 +142,15 @@ def transcrever():
 
         srt_blocks = []
         idx = 1
+        group_size = 4  # legendas de até 4 palavras (num final pula as remanescentes)
         for inicio, fim, text in orig_blocks:
             words = text.split()
-            group_size = 3
             num_groups = max(1, (len(words) + group_size - 1) // group_size)
             duration = fim - inicio
             for i in range(num_groups):
                 chunk = words[i*group_size:(i+1)*group_size]
-                if not chunk: break
+                if not chunk:
+                    break
                 st_sub = inicio + duration * (i/num_groups)
                 en_sub = inicio + duration * ((i+1)/num_groups)
                 srt_blocks.append((idx, st_sub, en_sub, " ".join(chunk)))
@@ -192,8 +193,13 @@ def gerar_csv():
     transcricao = data.get("transcricao", [])
     prompts     = data.get("prompts", [])
     texto_orig  = data.get("texto_original", "")
-    if not transcricao or not prompts or len(transcricao) != len(prompts):
-        return jsonify(error="transcricao+prompts inválidos"), 400
+
+    if not transcricao:
+        return jsonify(error="transcricao inválida"), 400
+
+    # se não enviar prompts ou tamanho diferente, usa o próprio texto da transcrição
+    if len(prompts) != len(transcricao):
+        prompts = [seg["texto"] for seg in transcricao]
 
     slug      = slugify(texto_orig)
     drive     = get_drive_service()
