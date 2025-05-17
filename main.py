@@ -112,6 +112,7 @@ def transcrever():
     if not audio_ref:
         return jsonify(error="campo 'audio_url' ou 'audio_file' obrigatório"), 400
 
+    # abre local ou faz download
     try:
         if os.path.exists(audio_ref):
             fobj = open(audio_ref, "rb")
@@ -124,34 +125,126 @@ def transcrever():
         return jsonify(error="falha ao carregar áudio", detalhe=str(e)), 400
 
     try:
-        # transcrição em SRT
-        srt = openai.audio.transcriptions.create(
+        # transcrição SRT bruta
+        raw_srt = openai.audio.transcriptions.create(
             model="whisper-1",
             file=fobj,
             response_format="srt"
         )
-        segmentos = []
-        # quebrar a cada ~3-4 palavras
-        for bloco in srt.strip().split("\n\n"):
-            lines = bloco.split("\n")
-            if len(lines) < 3: 
-                continue
-            st, en  = lines[1].split(" --> ")
-            txt_full = " ".join(lines[2:])
-            words = txt_full.split()
-            # refaz blocos a cada 4 palavras
-            for i in range(0, len(words), 4):
-                part = " ".join(words[i:i+4])
-                t0 = parse_ts(st) + (i/len(words)) * (parse_ts(en)-parse_ts(st))
-                t1 = min(parse_ts(en), t0 + 2.5)
-                segmentos.append({
-                    "inicio": round(t0,3),
-                    "fim":    round(t1,3),
-                    "texto":  part
-                })
+        # parse dos blocos originais
+        orig_blocks = []
+        for blk in raw_srt.strip().split("\n\n"):
+            parts = blk.split("\n")
+            if len(parts) < 3: continue
+            st, en = parts[1].split(" --> ")
+            text   = " ".join(parts[2:])
+            inicio = parse_ts(st)
+            fim    = parse_ts(en)
+            orig_blocks.append((inicio, fim, text))
 
-        total = segmentos[-1]["fim"] if segmentos else 0
-        return jsonify(transcricao=segmentos, duracao_total=total)
+        # gera blocos mais curtos de 3 palavras
+        srt_blocks = []
+        idx = 1
+        for inicio, fim, text in orig_blocks:
+            words = text.split()
+            num_groups = max(1, len(words) // 3 + (1 if len(words)%3 else 0))
+            dur = fim - inicio
+            for i in range(num_groups):
+                chunk = words[i*3:(i+1)*3]
+                if not chunk: break
+                sub_inicio = inicio + (dur * (i/num_groups))
+                sub_fim    = inicio + (dur * ((i+1)/num_groups))
+                srt_blocks.append((idx, sub_inicio, sub_fim, " ".join(chunk)))
+                idx += 1
+
+        # grava SRT no disco
+        srt_path = Path(f"{slugify(audio_ref)}.srt")
+        with open(srt_path, "w", encoding="utf-8") as f:
+            for num, st, en, txt in srt_blocks:
+                def fmt(s):
+                    h = int(s//3600); m = int((s%3600)//60)
+                    sec = int(s%60); ms = int((s%1)*1000)
+                    return f"{h:02}:{m:02}:{sec:02},{ms:03}"
+                f.write(f"{num}\n{fmt(st)} --> {fmt(en)}\n{txt}\n\n")
+
+        total = srt_blocks[-1][2] if srt_blocks else 0
+        return jsonify(transcricao=[{
+            "inicio": st, "fim": en, "texto": txt
+        } for _, st, en, txt in srt_blocks],
+        duracao_total=total)
+
+    except Exception as e:
+        return jsonify(error="falha na transcrição", detalhe=str(e)), 500
+
+    finally:
+        try: fobj.close()
+        except: pass@app.route("/transcrever", methods=["POST"])
+def transcrever():
+    data      = request.get_json(force=True) or {}
+    audio_ref = data.get("audio_url") or data.get("audio_file")
+    if not audio_ref:
+        return jsonify(error="campo 'audio_url' ou 'audio_file' obrigatório"), 400
+
+    # abre local ou faz download
+    try:
+        if os.path.exists(audio_ref):
+            fobj = open(audio_ref, "rb")
+        else:
+            resp = requests.get(audio_ref, timeout=60)
+            resp.raise_for_status()
+            fobj = io.BytesIO(resp.content)
+            fobj.name = Path(audio_ref).name
+    except Exception as e:
+        return jsonify(error="falha ao carregar áudio", detalhe=str(e)), 400
+
+    try:
+        # transcrição SRT bruta
+        raw_srt = openai.audio.transcriptions.create(
+            model="whisper-1",
+            file=fobj,
+            response_format="srt"
+        )
+        # parse dos blocos originais
+        orig_blocks = []
+        for blk in raw_srt.strip().split("\n\n"):
+            parts = blk.split("\n")
+            if len(parts) < 3: continue
+            st, en = parts[1].split(" --> ")
+            text   = " ".join(parts[2:])
+            inicio = parse_ts(st)
+            fim    = parse_ts(en)
+            orig_blocks.append((inicio, fim, text))
+
+        # gera blocos mais curtos de 3 palavras
+        srt_blocks = []
+        idx = 1
+        for inicio, fim, text in orig_blocks:
+            words = text.split()
+            num_groups = max(1, len(words) // 3 + (1 if len(words)%3 else 0))
+            dur = fim - inicio
+            for i in range(num_groups):
+                chunk = words[i*3:(i+1)*3]
+                if not chunk: break
+                sub_inicio = inicio + (dur * (i/num_groups))
+                sub_fim    = inicio + (dur * ((i+1)/num_groups))
+                srt_blocks.append((idx, sub_inicio, sub_fim, " ".join(chunk)))
+                idx += 1
+
+        # grava SRT no disco
+        srt_path = Path(f"{slugify(audio_ref)}.srt")
+        with open(srt_path, "w", encoding="utf-8") as f:
+            for num, st, en, txt in srt_blocks:
+                def fmt(s):
+                    h = int(s//3600); m = int((s%3600)//60)
+                    sec = int(s%60); ms = int((s%1)*1000)
+                    return f"{h:02}:{m:02}:{sec:02},{ms:03}"
+                f.write(f"{num}\n{fmt(st)} --> {fmt(en)}\n{txt}\n\n")
+
+        total = srt_blocks[-1][2] if srt_blocks else 0
+        return jsonify(transcricao=[{
+            "inicio": st, "fim": en, "texto": txt
+        } for _, st, en, txt in srt_blocks],
+        duracao_total=total)
 
     except Exception as e:
         return jsonify(error="falha na transcrição", detalhe=str(e)), 500
@@ -233,6 +326,56 @@ def gerar_csv():
 
     return jsonify(
         slug=slug,
+        folder_url=f"https://drive.google.com/drive/folders/{folder_id}"
+    )
+
+@app.route("/gerar_descricao", methods=["POST"])
+def gerar_descricao():
+    data       = request.get_json(force=True) or {}
+    texto_orig = data.get("texto_original")
+    folder_id  = data.get("folder_id")
+
+    if not texto_orig:
+        return jsonify(error="campo 'texto_original' obrigatório"), 400
+
+    # gera slug a partir do texto original
+    slug = slugify(texto_orig)
+
+    # obtém serviço do Drive (ou cria pasta se folder_id não vier)
+    drive = get_drive_service()
+    if not folder_id:
+        folder_id = criar_pasta_drive(slug, drive)
+
+    # chama o GPT para criar a descrição .txt
+    try:
+        resp = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role":"system", "content":
+                    "Você é um assistente que cria legendas para redes sociais, "
+                    "poéticas, motivacionais, com gatilhos de engajamento e tom cristão."},
+                {"role":"user", "content":
+                    f"Escreva 2–3 frases inspiradoras com “Siga @DeusTeEnviouIsso” de forma natural "
+                    "e finalize com 5 hashtags relevantes, baseado neste texto:\n\n"
+                    f"{texto_orig}"}
+            ],
+            temperature=0.8
+        )
+        descricao = resp.choices[0].message.content.strip()
+    except Exception as e:
+        return jsonify(error="falha ao gerar descrição", detalhe=str(e)), 500
+
+    # salva em .txt e envia para o Drive
+    txt_path = Path(f"{slug}.txt")
+    txt_path.write_text(descricao, encoding="utf-8")
+    try:
+        upload_para_drive(txt_path, txt_path.name, folder_id, drive)
+    except:
+        pass  # não bloqueia se falhar
+
+    return jsonify(
+        slug=slug,
+        descricao=descricao,
         folder_url=f"https://drive.google.com/drive/folders/{folder_id}"
     )
 
