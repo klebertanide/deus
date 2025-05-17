@@ -177,8 +177,10 @@ def transcrever():
         except: pass
 
 
-@app.route("/gerar_csv", methods=["POST"])   
-with open(csv_path, "w", ...) as f:
+@app.route("/gerar_csv", methods=["POST"])
+def gerar_csv():
+    # …
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
     upload_para_drive(csv_path, csv_path.name, folder_id, drive)
 
     # — Gera SRT (.srt) e envia —
