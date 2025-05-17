@@ -5,6 +5,7 @@ import re
 import tempfile
 import requests
 import unidecode
+import json
 from pathlib import Path
 from flask import Flask, request, jsonify
 import openai
@@ -111,7 +112,6 @@ def transcrever():
     if not audio_ref:
         return jsonify(error="campo 'audio_url' ou 'audio_file' obrigatório"), 400
 
-    # abre local ou faz download
     try:
         if os.path.exists(audio_ref):
             fobj = open(audio_ref, "rb")
@@ -129,7 +129,6 @@ def transcrever():
             file=fobj,
             response_format="srt"
         )
-        # reagrupa cada ~4 palavras em seu próprio bloco SRT
         orig_blocks = []
         for blk in raw_srt.strip().split("\n\n"):
             parts = blk.split("\n")
@@ -142,7 +141,7 @@ def transcrever():
 
         srt_blocks = []
         idx = 1
-        group_size = 4  # legendas de até 4 palavras (num final pula as remanescentes)
+        group_size = 4
         for inicio, fim, text in orig_blocks:
             words = text.split()
             num_groups = max(1, (len(words) + group_size - 1) // group_size)
@@ -156,7 +155,6 @@ def transcrever():
                 srt_blocks.append((idx, st_sub, en_sub, " ".join(chunk)))
                 idx += 1
 
-        # escreve o SRT no disco
         srt_path = Path(f"{slugify(audio_ref)}.srt")
         with open(srt_path, "w", encoding="utf-8") as f:
             for num, st, en, txt in srt_blocks:
@@ -191,40 +189,38 @@ def gerar_csv():
     )
     data        = request.get_json() or {}
     transcricao = data.get("transcricao", [])
-    prompts     = data.get("prompts", [])
     texto_orig  = data.get("texto_original", "")
 
     if not transcricao:
         return jsonify(error="transcricao inválida"), 400
 
-    # se não enviar prompts ou tamanho diferente, usa o próprio texto da transcrição
-    if len(prompts) != len(transcricao):
-        prompts = [seg["texto"] for seg in transcricao]
-
     slug      = slugify(texto_orig)
     drive     = get_drive_service()
     folder_id = criar_pasta_drive(slug, drive)
 
-    # — Gera descrição (.txt) —
-    try:
-        resp = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role":"system", "content":
-                 "Você é um assistente que cria descrições poéticas e motivacionais para redes sociais."},
-                {"role":"user", "content":
-                 f"Escreva 2–3 frases inspiradoras com 'Siga @DeusTeEnviouIsso' de forma natural e finalize com 5 hashtags, baseado neste texto:\n\n{texto_orig}"}
-            ],
-            temperature=0.7
-        )
-        descricao = resp.choices[0].message.content.strip()
-    except:
-        descricao = ""
-
-    txt_path = Path(f"{slug}.txt")
-    if descricao:
-        txt_path.write_text(descricao, encoding="utf-8")
-        upload_para_drive(txt_path, txt_path.name, folder_id, drive)
+    # — Gera prompts artísticos via GPT —
+    duracao_total   = transcricao[-1]["fim"]
+    imagens_por_min = 10
+    num_images      = max(1, int(duracao_total / 60 * imagens_por_min))
+    resumo_ts = "\n".join([
+        f"{seg['inicio']:.2f}-{seg['fim']:.2f}: {seg['texto']}"
+        for seg in transcricao
+    ])
+    resp_prompts = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[
+            {"role":"system", "content":
+             "Você é um assistente que transforma transcrições em prompts de ilustração dinâmicos."},
+            {"role":"user", "content":
+             f"Dada esta transcrição com tempos (em segundos):\n\n{resumo_ts}\n\n"
+             f"Gere exatamente {num_images} prompts de ilustração em português, "
+             "de forma artística, cobrindo todo o conteúdo sem espaços em branco. "
+             "Responda SOMENTE um JSON no formato:\n"
+             "[{{\"t\": número_de_segundos, \"prompt\": \"descrição da imagem\"}}, ...]"}
+        ],
+        temperature=0.7
+    )
+    prompts_data = json.loads(resp_prompts.choices[0].message.content)
 
     # — Gera CSV (.csv) —
     csv_path = Path(f"{slug}.csv")
@@ -239,22 +235,22 @@ def gerar_csv():
             "MAGIC_PROMPT", "MODEL", "SEED_NUMBER",
             "RENDERING", "NEGATIVE_PROMPT",
             "STYLE", "COLOR_PALETTE", "Num_images"
-    ])
-        for seg, p in zip(transcricao, prompts):
-            t = int(seg["inicio"])
-            prompt_full = f"{t} {p} {aquarela_info}"
+        ])
+        for item in prompts_data:
+            t = item["t"]
+            p = item["prompt"]
+            prompt_full = f"t({t}) {p} {aquarela_info}"
             w.writerow([
                 prompt_full,
                 "PRIVATE", "9:16", "ON", "3.0", "",
                 "TURBO", neg, "AUTO", "", "4"
-               ])
+            ])
     upload_para_drive(csv_path, csv_path.name, folder_id, drive)
-    
 
     # — Gera SRT (.srt) —
     def fmt(s):
         ms = int((s%1)*1000); h = int(s//3600)
-        m = int((s%3600)//60); sec=int(s%60)
+        m = int((s%3600)//60); sec = int(s%60)
         return f"{h:02}:{m:02}:{sec:02},{ms:03}"
     srt_path = Path(f"{slug}.srt")
     with open(srt_path, "w", encoding="utf-8") as f:
