@@ -121,7 +121,6 @@ def transcrever():
         return jsonify(error="falha ao carregar áudio", detalhe=str(e)), 400
 
     try:
-        # usa o novo client para transcrição
         raw_srt = client.audio.transcriptions.create(
             model="whisper-1",
             file=fobj,
@@ -171,52 +170,11 @@ def transcrever():
 
     except Exception as e:
         return jsonify(error="falha na transcrição", detalhe=str(e)), 500
-
     finally:
         try: fobj.close()
         except: pass
 
-
 @app.route("/gerar_csv", methods=["POST"])
-def gerar_csv():
-    # …
-    with open(csv_path, "w", newline="", encoding="utf-8") as f:
-    upload_para_drive(csv_path, csv_path.name, folder_id, drive)
-
-    # — Gera SRT (.srt) e envia —
-    def fmt(s):
-        ms = int((s%1)*1000); h = int(s//3600)
-        m = int((s%3600)//60); sec = int(s%60)
-        return f"{h:02}:{m:02}:{sec:02},{ms:03}"
-
-    srt_path = Path(f"{slug}.srt")
-    with open(srt_path, "w", encoding="utf-8") as f:
-        for i, seg in enumerate(transcricao, 1):
-            f.write(f"{i}\n{fmt(seg['inicio'])} --> {fmt(seg['fim'])}\n{seg['texto']}\n\n")
-    upload_para_drive(srt_path, srt_path.name, folder_id, drive)
-
-    # — Reenvia o MP3 (se existir) —
-    mp3 = Path(f"{slug}.mp3")
-    if mp3.exists():
-        upload_para_drive(mp3, mp3.name, folder_id, drive)
-
-    # ← agora sim retornamos só depois de tudo enviado
-    return jsonify(
-        slug=slug,
-        folder_url=f"https://drive.google.com/drive/folders/{folder_id}"
-    )
-
-    # — Reenvia o MP3 (se existir) —
-    mp3 = Path(f"{slug}.mp3")
-    if mp3.exists():
-        upload_para_drive(mp3, mp3.name, folder_id, drive)
-
-    # ← agora sim retornamos só depois de tudo enviado
-    return jsonify(
-        slug=slug,
-        folder_url=f"https://drive.google.com/drive/folders/{folder_id}"
-    )
-
 def gerar_csv():
     aquarela_info = (
         "A imagem deve parecer uma pintura tradicional em aquarela, com foco em: "
@@ -274,12 +232,9 @@ def gerar_csv():
             "RENDERING", "NEGATIVE_PROMPT",
             "STYLE", "COLOR_PALETTE", "Num_images"
         ])
-
         for item in prompts_data:
-            # arredonda e pega só o inteiro
             segundos = int(round(item["t"]))
             p = item["prompt"]
-            # remove o “t()” e usa só o número
             prompt_full = f"{segundos} {p} {aquarela_info}"
             w.writerow([
                 prompt_full,
@@ -288,10 +243,27 @@ def gerar_csv():
             ])
     upload_para_drive(csv_path, csv_path.name, folder_id, drive)
 
-    # — Gera SRT (.srt) e reenvia MP3 idem ao anterior —
+    # — Gera SRT (.srt) e envia —
+    def fmt(s):
+        ms = int((s%1)*1000); h = int(s//3600)
+        m = int((s%3600)//60); sec = int(s%60)
+        return f"{h:02}:{m:02}:{sec:02},{ms:03}"
 
-    return jsonify(slug=slug,
-                   folder_url=f"https://drive.google.com/drive/folders/{folder_id}")
+    srt_path = Path(f"{slug}.srt")
+    with open(srt_path, "w", encoding="utf-8") as f:
+        for i, seg in enumerate(transcricao, 1):
+            f.write(f"{i}\n{fmt(seg['inicio'])} --> {fmt(seg['fim'])}\n{seg['texto']}\n\n")
+    upload_para_drive(srt_path, srt_path.name, folder_id, drive)
+
+    # — Reenvia o MP3 (se existir) —
+    mp3 = Path(f"{slug}.mp3")
+    if mp3.exists():
+        upload_para_drive(mp3, mp3.name, folder_id, drive)
+
+    return jsonify(
+        slug=slug,
+        folder_url=f"https://drive.google.com/drive/folders/{folder_id}"
+    )
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0",
