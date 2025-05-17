@@ -178,8 +178,7 @@ def transcrever():
 
 
 @app.route("/gerar_csv", methods=["POST"])   
-    with open(csv_path, "w", ...) as f:
-        # ... seu loop de escrita ...
+with open(csv_path, "w", ...) as f:
     upload_para_drive(csv_path, csv_path.name, folder_id, drive)
 
     # — Gera SRT (.srt) e envia —
