@@ -178,7 +178,9 @@ def transcrever():
 
     finally:
         try: fobj.close()
-        except: pass@app.route("/transcrever", methods=["POST"])
+        except: pass
+
+@app.route("/transcrever", methods=["POST"])
 def transcrever():
     data      = request.get_json(force=True) or {}
     audio_ref = data.get("audio_url") or data.get("audio_file")
