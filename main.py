@@ -48,7 +48,7 @@ def upload_para_drive(path: Path, nome: str, folder_id: str, drive):
 # —————— Helpers ——————
 def slugify(text: str, limit: int = 30) -> str:
     txt = unidecode.unidecode(text)
-    txt = re.sub(r"[^\w\s]", "", txt)
+    txt = re.sub(r"[^\w\s]", "", "")
     return txt.strip().replace(" ", "_").lower()[:limit]
 
 def elevenlabs_tts(text: str) -> bytes:
@@ -96,18 +96,33 @@ def falar():
     mp3_path = Path(f"{slug}.mp3")
 
     try:
+        if not ELEVEN_API_KEY:
+            raise Exception("ELEVEN_API_KEY não está definido")
+
         audio_bytes = elevenlabs_tts(texto)
+
+        if not audio_bytes or len(audio_bytes) < 1000:
+            raise Exception(f"Áudio gerado é muito pequeno ou vazio: {len(audio_bytes)} bytes")
+
+        mp3_path.write_bytes(audio_bytes)
+        print(f"Tamanho do MP3 salvo: {mp3_path.stat().st_size} bytes")
+
     except Exception as e:
         return jsonify(error="falha ElevenLabs", detalhe=str(e)), 500
 
-    mp3_path.write_bytes(audio_bytes)
-
     # — envio do MP3 para o Google Drive —
-    drive    = get_drive_service()
-    folder_id = GOOGLE_DRIVE_ROOT_FOLDER
-    upload_para_drive(mp3_path, mp3_path.name, folder_id, drive)
+    try:
+        drive     = get_drive_service()
+        folder_id = GOOGLE_DRIVE_ROOT_FOLDER
+        upload_para_drive(mp3_path, mp3_path.name, folder_id, drive)
+    except Exception as e:
+        return jsonify(error="falha no upload do MP3 para o Drive", detalhe=str(e)), 500
 
-    return jsonify(audio_url=str(mp3_path.resolve()), slug=slug)
+    return jsonify(
+        audio_url=str(mp3_path.resolve()),
+        slug=slug,
+        drive_link=f"https://drive.google.com/drive/folders/{GOOGLE_DRIVE_ROOT_FOLDER}"
+    )
 
 @app.route("/transcrever", methods=["POST"])
 def transcrever():
@@ -201,18 +216,15 @@ def gerar_csv():
     drive     = get_drive_service()
     folder_id = criar_pasta_drive(slug, drive)
 
-    # — Novo cálculo: 1 prompt a cada 4 segundos —
     duracao_total = transcricao[-1]["fim"]
-    intervalo     = 4  # segundos por prompt
+    intervalo     = 4
     prompts_count = math.ceil(duracao_total / intervalo)
 
-    # monta o resumo com timestamps (para o GPT ter referência)
     resumo_ts = "\n".join([
         f"{seg['inicio']:.2f}-{seg['fim']:.2f}: {seg['texto']}"
         for seg in transcricao
     ])
 
-    # chama o GPT pedindo exatamente N prompts, 1 a cada 4 s
     resp_prompts = client.chat.completions.create(
         model="gpt-4",
         messages=[
@@ -230,7 +242,26 @@ def gerar_csv():
     )
     prompts_data = json.loads(resp_prompts.choices[0].message.content)
 
-    # — Gera CSV (.csv) —
+    # — Gera descrição social —
+    resp_descricao = client.chat.completions.create(
+        model="gpt-4",
+        messages=[
+            {"role": "system", "content":
+             "Você é um redator cristão que cria descrições curtas e inspiradoras para redes sociais, com base em textos religiosos ou motivacionais."},
+            {"role": "user", "content":
+             f"Com base no texto a seguir, gere uma descrição de no máximo 2 linhas, que inspire e tenha ligação com fé, superação ou propósito. "
+             f"No meio, insira exatamente a frase: '🙏 Siga @DeusTeEnviouIsso para mais conteúdo de fé no seu dia-a-dia!'. "
+             f"No final, adicione 6 hashtags relevantes ao conteúdo. Responda apenas com o conteúdo final, pronto para copiar e colar.\n\nTexto original:\n{texto_orig}"}
+        ],
+        temperature=0.8
+    )
+    descricao_social = resp_descricao.choices[0].message.content.strip()
+    txt_desc_path = Path(f"{slug}_descricao.txt")
+    with open(txt_desc_path, "w", encoding="utf-8") as f:
+        f.write(descricao_social)
+    upload_para_drive(txt_desc_path, txt_desc_path.name, folder_id, drive)
+
+    # — Gera CSV —
     csv_path = Path(f"{slug}.csv")
     neg = (
         "low quality, overexposed, underexposed, extra limbs, missing fingers, "
@@ -248,7 +279,6 @@ def gerar_csv():
             segundos    = int(round(item["t"]))
             p           = item["prompt"]
             prompt_full = f"{segundos} {p} {aquarela_info}"
-            # continua fixo com 4 imagens por prompt (limitação do Ideogram)
             w.writerow([
                 prompt_full,
                 "PRIVATE", "9:16", "ON", "3.0", "",
@@ -261,7 +291,44 @@ def gerar_csv():
         slug=slug,
         folder_url=f"https://drive.google.com/drive/folders/{folder_id}"
     )
-    
+
+@app.route("/listar_arquivos_drive", methods=["GET"])
+def listar_arquivos_drive():
+    try:
+        drive = get_drive_service()
+        arquivos = []
+
+        page_token = None
+        while True:
+            response = drive.files().list(
+                q=f"'{GOOGLE_DRIVE_ROOT_FOLDER}' in parents and trashed = false",
+                spaces="drive",
+                fields="nextPageToken, files(id, name, mimeType)",
+                pageToken=page_token
+            ).execute()
+
+            for file in response.get("files", []):
+                link = ""
+                if file["mimeType"] == "application/vnd.google-apps.folder":
+                    link = f"https://drive.google.com/drive/folders/{file['id']}"
+                else:
+                    link = f"https://drive.google.com/file/d/{file['id']}/view"
+
+                arquivos.append({
+                    "nome": file["name"],
+                    "tipo": "pasta" if file["mimeType"] == "application/vnd.google-apps.folder" else "arquivo",
+                    "link": link
+                })
+
+            page_token = response.get("nextPageToken", None)
+            if page_token is None:
+                break
+
+        return jsonify(arquivos=arquivos)
+
+    except Exception as e:
+        return jsonify(error="falha ao listar arquivos", detalhe=str(e)), 500
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0",
             port=int(os.getenv("PORT", "5000")),
