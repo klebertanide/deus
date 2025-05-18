@@ -101,6 +101,12 @@ def falar():
         return jsonify(error="falha ElevenLabs", detalhe=str(e)), 500
 
     mp3_path.write_bytes(audio_bytes)
+
+    # — envio do MP3 para o Google Drive —
+    drive    = get_drive_service()
+    folder_id = GOOGLE_DRIVE_ROOT_FOLDER
+    upload_para_drive(mp3_path, mp3_path.name, folder_id, drive)
+
     return jsonify(audio_url=str(mp3_path.resolve()), slug=slug)
 
 @app.route("/transcrever", methods=["POST"])
@@ -250,9 +256,6 @@ def gerar_csv():
             ])
 
     upload_para_drive(csv_path, csv_path.name, folder_id, drive)
-
-    # — Reenvia SRT e MP3 (igual antes) …
-    # (mantém seu código de SRT e MP3 sem alterações)
 
     return jsonify(
         slug=slug,
