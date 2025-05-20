@@ -24,8 +24,6 @@ GOOGLE_DRIVE_ROOT_FOLDER = "1d6RxnsYRS52oKUPGyuAfJZ00bksUUVI2"
 SERVICE_ACCOUNT_FILE     = "/etc/secrets/service_account.json"
 ELEVEN_API_KEY           = os.getenv("ELEVENLABS_API_KEY")
 
-subpastas_por_slug = {}  # cache temporário por request
-
 def get_drive_service():
     creds = service_account.Credentials.from_service_account_file(
         SERVICE_ACCOUNT_FILE,
@@ -53,17 +51,9 @@ def criar_subpasta(slug: str, drive, parent_folder_id: str):
     return drive.files().create(body=meta).execute()["id"]
 
 def upload_para_drive(path: Path, nome: str, folder_id: str, drive):
-    global subpastas_por_slug
-    slug = nome.split("_")[0]
-    if slug in subpastas_por_slug:
-        final_folder_id = subpastas_por_slug[slug]
-    else:
-        final_folder_id = criar_subpasta(slug, drive, folder_id)
-        subpastas_por_slug[slug] = final_folder_id
-
     media = MediaFileUpload(str(path), resumable=True)
     drive.files().create(
-        body={"name": nome, "parents": [final_folder_id]},
+        body={"name": nome, "parents": [folder_id]},
         media_body=media
     ).execute()
 
@@ -113,9 +103,6 @@ def parse_ts(ts: str) -> float:
 
 @app.route("/falar", methods=["POST"])
 def falar():
-    global subpastas_por_slug
-    subpastas_por_slug = {}
-
     data = request.get_json(force=True) or {}
     texto = data.get("texto")
     if not texto:
@@ -139,8 +126,7 @@ def falar():
         drive = get_drive_service()
         root_folder = criar_pasta_se_preciso(GOOGLE_DRIVE_ROOT_FOLDER, drive)
         subfolder_id = criar_subpasta(slug, drive, root_folder)
-        subpastas_por_slug[slug] = subfolder_id
-        upload_para_drive(mp3_path, mp3_path.name, root_folder, drive)
+        upload_para_drive(mp3_path, mp3_path.name, subfolder_id, drive)
     except Exception as e:
         return jsonify(error="falha no upload do MP3 para o Drive", detalhe=str(e)), 500
 
@@ -175,8 +161,11 @@ def transcrever():
             response_format="srt"
         )
         blocks = []
-        for blk in raw_srt.strip().split("\n\n"):
-            parts = blk.split("\n")
+        for blk in raw_srt.strip().split("
+
+"):
+            parts = blk.split("
+")
             if len(parts) < 3:
                 continue
             st, en = parts[1].split(" --> ")
