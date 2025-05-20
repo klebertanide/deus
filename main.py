@@ -129,7 +129,7 @@ def transcrever():
     except Exception as e:
         return jsonify(error="falha ao carregar áudio", detalhe=str(e)), 400
 
-    try:
+  try:
         raw_srt = client.audio.transcriptions.create(
             model="whisper-1",
             file=fobj,
@@ -137,12 +137,9 @@ def transcrever():
         )
         blocks = []
         for blk in raw_srt.strip().split("\n\n"):
-
-
-"):
-            parts = blk.split("
-")
-            if len(parts) < 3: continue
+            parts = blk.split("\n")
+            if len(parts) < 3:
+                continue
             st, en = parts[1].split(" --> ")
             txt = " ".join(parts[2:])
             inicio = parse_ts(st)
