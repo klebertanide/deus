@@ -129,7 +129,7 @@ def transcrever():
     except Exception as e:
         return jsonify(error="falha ao carregar áudio", detalhe=str(e)), 400
 
-  try:
+    try:
         raw_srt = client.audio.transcriptions.create(
             model="whisper-1",
             file=fobj,
@@ -150,8 +150,11 @@ def transcrever():
     except Exception as e:
         return jsonify(error="falha na transcrição", detalhe=str(e)), 500
     finally:
-        try: fobj.close()
-        except: pass
+        try:
+            fobj.close()
+        except:
+            pass
+
 
 
 if __name__ == "__main__":
