@@ -24,6 +24,8 @@ GOOGLE_DRIVE_ROOT_FOLDER = "1d6RxnsYRS52oKUPGyuAfJZ00bksUUVI2"
 SERVICE_ACCOUNT_FILE     = "/etc/secrets/service_account.json"
 ELEVEN_API_KEY           = os.getenv("ELEVENLABS_API_KEY")
 
+subpastas_por_slug = {}  # cache temporário por request
+
 def get_drive_service():
     creds = service_account.Credentials.from_service_account_file(
         SERVICE_ACCOUNT_FILE,
@@ -51,9 +53,18 @@ def criar_subpasta(slug: str, drive, parent_folder_id: str):
     return drive.files().create(body=meta).execute()["id"]
 
 def upload_para_drive(path: Path, nome: str, folder_id: str, drive):
+    global subpastas_por_slug
+    slug = nome.split("_")[0]
+    if slug in subpastas_por_slug:
+        final_folder_id = subpastas_por_slug[slug]
+    else:
+        final_folder_id = criar_subpasta(slug, drive, folder_id)
+        subpastas_por_slug[slug] = final_folder_id
+
     media = MediaFileUpload(str(path), resumable=True)
     drive.files().create(
-        body={"name": nome, "parents": [folder_id]},
+
+        body={"name": nome, "parents": [final_folder_id]},
         media_body=media
     ).execute()
 
@@ -105,40 +116,104 @@ def parse_ts(ts: str) -> float:
 def home():
     return "API DeusTeEnviouIsso OK"
 
-@app.route("/falar", methods=["POST"])
-def falar():
-    data = request.get_json(force=True) or {}
-    texto = data.get("texto")
-    if not texto:
-        return jsonify(error="campo 'texto' obrigatório"), 400
+@app.route("/gerar_csv", methods=["POST"])
+def gerar_csv():
+    global subpastas_por_slug
 
-    slug = slugify(texto)
-    mp3_path = Path("saida") / f"{slug}_audio.mp3"
-    mp3_path.parent.mkdir(parents=True, exist_ok=True)
+    data = request.get_json(force=True) or {}
+    transcricao = data.get("transcricao")
+    prompts = data.get("prompts")
+    texto_original = data.get("texto_original")
+
+    if not transcricao or not prompts or not texto_original:
+        return jsonify(error="Campos obrigatórios: transcricao, prompts, texto_original"), 400
+
+    slug = slugify(texto_original)
+    out_dir = Path("saida")
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    csv_path = out_dir / f"{slug}_csv.csv"
+    srt_path = out_dir / f"{slug}_legenda.srt"
 
     try:
-        if not ELEVEN_API_KEY:
-            raise Exception("ELEVEN_API_KEY não está definido")
-        audio_bytes = elevenlabs_tts(texto)
-        if not audio_bytes or len(audio_bytes) < 1000:
-            raise Exception("Áudio gerado é vazio ou muito pequeno.")
-        mp3_path.write_bytes(audio_bytes)
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["inicio", "fim", "texto", "prompt"])
+            for i, seg in enumerate(transcricao):
+                inicio = round(seg["inicio"], 2)
+                fim = round(seg["fim"], 2)
+                texto = seg["texto"]
+                prompt = prompts[i] if i < len(prompts) else ""
+                writer.writerow([inicio, fim, texto, prompt])
+
+        with open(srt_path, "w", encoding="utf-8") as f:
+            for i, seg in enumerate(transcricao):
+                ini = seg["inicio"]
+                fim = seg["fim"]
+                txt = seg["texto"]
+                ts_ini = format_ts(ini)
+                ts_fim = format_ts(fim)
+                f.write(f"{i+1}
+{ts_ini} --> {ts_fim}
+{txt}
+
+")
+
+        drive = get_drive_service()
+        folder_id = criar_pasta_se_preciso(GOOGLE_DRIVE_ROOT_FOLDER, drive)
+        subfolder_id = subpastas_por_slug.get(slug) or criar_subpasta(slug, drive, folder_id)
+        subpastas_por_slug[slug] = subfolder_id
+
+        upload_para_drive(csv_path, csv_path.name, folder_id, drive)
+        upload_para_drive(srt_path, srt_path.name, folder_id, drive)
+
+        return jsonify(slug=slug, folder_url=f"https://drive.google.com/drive/folders/{subfolder_id}")
+
     except Exception as e:
-        return jsonify(error="falha ElevenLabs", detalhe=str(e)), 500
+        return jsonify(error="Erro ao gerar CSV ou enviar arquivos", detalhe=str(e)), 500
+
+
+def format_ts(segundos: float) -> str:
+    h = int(segundos // 3600)
+    m = int((segundos % 3600) // 60)
+    s = int(segundos % 60)
+    ms = int((segundos - int(segundos)) * 1000)
+    return f"{h:02}:{m:02}:{s:02},{ms:03}"
+
+
+@app.route("/gerar_descricao", methods=["POST"])
+def gerar_descricao():
+    global subpastas_por_slug
+
+    data = request.get_json(force=True) or {}
+    texto_original = data.get("texto_original")
+    folder_id = data.get("folder_id")
+    if not texto_original:
+        return jsonify(error="campo 'texto_original' obrigatório"), 400
+
+    slug = slugify(texto_original)
+    descricao = f"Às vezes, tudo o que precisamos é lembrar disso: {texto_original.strip()}"
+
+    txt_path = Path("saida") / f"{slug}_descricao.txt"
+    txt_path.parent.mkdir(parents=True, exist_ok=True)
+    txt_path.write_text(descricao, encoding="utf-8")
 
     try:
         drive = get_drive_service()
-        root_folder = criar_pasta_se_preciso(GOOGLE_DRIVE_ROOT_FOLDER, drive)
-        subfolder_id = criar_subpasta(slug, drive, root_folder)
-        upload_para_drive(mp3_path, mp3_path.name, subfolder_id, drive)
+        base_folder = criar_pasta_se_preciso(GOOGLE_DRIVE_ROOT_FOLDER, drive)
+        subfolder_id = subpastas_por_slug.get(slug) or criar_subpasta(slug, drive, base_folder)
+        subpastas_por_slug[slug] = subfolder_id
+        upload_para_drive(txt_path, txt_path.name, base_folder, drive)
+        return jsonify(slug=slug, descricao=descricao, folder_url=f"https://drive.google.com/drive/folders/{subfolder_id}")
     except Exception as e:
-        return jsonify(error="falha no upload do MP3 para o Drive", detalhe=str(e)), 500
-
-    return jsonify(
-        audio_url=str(mp3_path.resolve()),
+        return jsonify(error="Erro ao enviar descrição", detalhe=str(e)), 500),
+        slug=slug,
+        drive_folder_url=f"https://drive.google.com/drive/folders/{subfolder_id}"
+    )),
         slug=slug,
         drive_folder_url=f"https://drive.google.com/drive/folders/{subfolder_id}"
     )
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
