@@ -31,6 +31,17 @@ def get_drive_service():
     )
     return build("drive", "v3", credentials=creds)
 
+def criar_pasta_se_preciso(pasta_alvo, drive):
+    try:
+        drive.files().get(fileId=pasta_alvo, fields="id").execute()
+    except HttpError:
+        meta = {
+            "name": "DEUS_TTS_AUTOGERADA",
+            "mimeType": "application/vnd.google-apps.folder"
+        }
+        pasta_alvo = drive.files().create(body=meta).execute()["id"]
+    return pasta_alvo
+
 def criar_subpasta(slug: str, drive, parent_folder_id: str):
     meta = {
         "name": slug,
@@ -128,49 +139,3 @@ def falar():
         slug=slug,
         drive_folder_url=f"https://drive.google.com/drive/folders/{subfolder_id}"
     )
-
-@app.route("/transcrever", methods=["POST"])
-def transcrever():
-    data = request.get_json(force=True) or {}
-    audio_ref = data.get("audio_url") or data.get("audio_file")
-    if not audio_ref:
-        return jsonify(error="campo 'audio_url' ou 'audio_file' obrigatório"), 400
-
-    try:
-        if os.path.exists(audio_ref):
-            fobj = open(audio_ref, "rb")
-        else:
-            resp = requests.get(audio_ref, timeout=60)
-            resp.raise_for_status()
-            fobj = io.BytesIO(resp.content)
-            fobj.name = Path(audio_ref).name or "audio.mp3"
-    except Exception as e:
-        return jsonify(error="falha ao carregar áudio", detalhe=str(e)), 400
-
-    try:
-        raw_srt = client.audio.transcriptions.create(
-            model="whisper-1",
-            file=fobj,
-            response_format="srt"
-        )
-        blocks = []
-        for blk in raw_srt.strip().split("\n\n"):
-            parts = blk.split("\n")
-            if len(parts) < 3: continue
-            st, en = parts[1].split(" --> ")
-            txt = " ".join(parts[2:])
-            inicio = parse_ts(st)
-            fim = parse_ts(en)
-            blocks.append((inicio, fim, txt))
-        total = blocks[-1][1] if blocks else 0
-        return jsonify(transcricao=[{"inicio": i, "fim": f, "texto": t} for i, f, t in blocks], duracao_total=total)
-    except Exception as e:
-        return jsonify(error="falha na transcrição", detalhe=str(e)), 500
-    finally:
-        try: fobj.close()
-        except: pass
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
-
