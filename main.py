@@ -30,6 +30,21 @@ def get_drive_service():
     return build("drive", "v3", credentials=creds)
 
 def criar_subpasta(nome: str, drive, parent_folder_id: str):
+    # Verificar se a pasta já existe
+    try:
+        results = drive.files().list(
+            q=f"name='{nome}' and mimeType='application/vnd.google-apps.folder' and '{parent_folder_id}' in parents",
+            spaces='drive',
+            fields='files(id, name)'
+        ).execute()
+        
+        items = results.get('files', [])
+        if items:
+            return items[0]['id']
+    except Exception:
+        pass  # Se falhar, continua e cria uma nova pasta
+    
+    # Criar nova pasta
     meta = {
         "name": nome,
         "mimeType": "application/vnd.google-apps.folder",
@@ -89,6 +104,14 @@ def falar():
 
     slug = slugify(texto)
     mp3_path = Path(f"{slug}_audio.mp3")
+    txt_path = Path(f"{slug}_texto.txt")
+
+    # Salvar o texto original em um arquivo TXT
+    try:
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write(texto)
+    except Exception as e:
+        return jsonify(error="falha ao salvar arquivo de texto", detalhe=str(e)), 500
 
     try:
         audio_bytes = elevenlabs_tts(texto)
@@ -101,9 +124,14 @@ def falar():
     try:
         drive = get_drive_service()
         folder_id = criar_subpasta(slug, drive, GOOGLE_DRIVE_ROOT_FOLDER)
+        
+        # Upload do MP3
         upload_para_drive(mp3_path, mp3_path.name, folder_id, drive)
+        
+        # Upload do TXT com o texto original
+        upload_para_drive(txt_path, txt_path.name, folder_id, drive)
     except Exception as e:
-        return jsonify(error="falha no upload do MP3 para o Drive", detalhe=str(e)), 500
+        return jsonify(error="falha no upload para o Drive", detalhe=str(e)), 500
 
     return jsonify(audio_url=str(mp3_path.resolve()), slug=slug, folder_id=folder_id)
 
@@ -111,8 +139,16 @@ def falar():
 def transcrever():
     data = request.get_json(force=True) or {}
     audio_ref = data.get("audio_url") or data.get("audio_file")
+    slug = data.get("slug")
+    
     if not audio_ref:
         return jsonify(error="campo 'audio_url' ou 'audio_file' obrigatório"), 400
+    
+    if not slug:
+        # Tentar extrair slug do nome do arquivo
+        slug = Path(audio_ref).stem
+        if "_audio" in slug:
+            slug = slug.replace("_audio", "")
 
     try:
         if os.path.exists(audio_ref):
@@ -138,7 +174,22 @@ def transcrever():
             fim = parse_ts(en)
             blocks.append((inicio, fim, txt))
         total = blocks[-1][1] if blocks else 0
-        return jsonify(transcricao=[{"inicio": i, "fim": f, "texto": t} for i, f, t in blocks], duracao_total=total)
+        
+        # Salvar o SRT em um arquivo
+        srt_path = Path(f"{slug}_legenda.srt")
+        with open(srt_path, "w", encoding="utf-8") as f:
+            f.write(raw_srt)
+        
+        # Upload do SRT para o Drive
+        try:
+            drive = get_drive_service()
+            folder_id = criar_subpasta(slug, drive, GOOGLE_DRIVE_ROOT_FOLDER)
+            upload_para_drive(srt_path, srt_path.name, folder_id, drive)
+        except Exception as e:
+            print(f"Erro ao fazer upload do SRT: {e}")
+            # Continua mesmo com erro no upload
+        
+        return jsonify(transcricao=[{"inicio": i, "fim": f, "texto": t} for i, f, t in blocks], duracao_total=total, slug=slug)
     except Exception as e:
         return jsonify(error="falha na transcrição", detalhe=str(e)), 500
     finally:
@@ -151,26 +202,35 @@ def gerar_csv():
     transcricao = data.get("transcricao")
     prompts = data.get("prompts")
     texto_original = data.get("texto_original")
+    slug = data.get("slug")
 
-    if not transcricao or not prompts or not texto_original:
-        return jsonify(error="transcricao, prompts e texto_original são obrigatórios"), 400
+    if not transcricao or not prompts:
+        return jsonify(error="transcricao e prompts são obrigatórios"), 400
+    
+    # Se não tiver slug nem texto_original, gera um slug aleatório
+    if not slug and not texto_original:
+        slug = gerar_slug()
+    elif not slug:
+        slug = slugify(texto_original)
 
-    slug = slugify(texto_original)
-    drive = get_drive_service()
-    pasta_id = criar_subpasta(slug, drive, GOOGLE_DRIVE_ROOT_FOLDER)
+    try:
+        drive = get_drive_service()
+        pasta_id = criar_subpasta(slug, drive, GOOGLE_DRIVE_ROOT_FOLDER)
 
-    # CSV
-    csv_path = Path(f"{slug}_prompts.csv")
-    with open(csv_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["inicio", "fim", "texto", "prompt"])
-        for linha, prompt in zip(transcricao, prompts):
-            writer.writerow([linha["inicio"], linha["fim"], linha["texto"], prompt])
+        # CSV
+        csv_path = Path(f"{slug}_prompts.csv")
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["inicio", "fim", "texto", "prompt"])
+            for linha, prompt in zip(transcricao, prompts):
+                writer.writerow([linha["inicio"], linha["fim"], linha["texto"], prompt])
 
-    # Upload
-    upload_para_drive(csv_path, csv_path.name, pasta_id, drive)
+        # Upload
+        upload_para_drive(csv_path, csv_path.name, pasta_id, drive)
 
-    return jsonify(slug=slug, folder_url=f"https://drive.google.com/drive/folders/{pasta_id}")
+        return jsonify(slug=slug, folder_url=f"https://drive.google.com/drive/folders/{pasta_id}")
+    except Exception as e:
+        return jsonify(error="falha ao gerar CSV ou fazer upload", detalhe=str(e)), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
