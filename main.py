@@ -111,6 +111,45 @@ def parse_ts(ts: str) -> float:
     s, ms = rest.split(",")
     return int(h)*3600 + int(m)*60 + int(s) + int(ms)/1000
 
+@app.route("/falar", methods=["POST"])
+def falar():
+    global subpastas_por_slug
+    subpastas_por_slug = {}
+
+    data = request.get_json(force=True) or {}
+    texto = data.get("texto")
+    if not texto:
+        return jsonify(error="campo 'texto' obrigatório"), 400
+
+    slug = slugify(texto)
+    mp3_path = Path("saida") / f"{slug}_audio.mp3"
+    mp3_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        if not ELEVEN_API_KEY:
+            raise Exception("ELEVEN_API_KEY não está definido")
+        audio_bytes = elevenlabs_tts(texto)
+        if not audio_bytes or len(audio_bytes) < 1000:
+            raise Exception("Áudio gerado é vazio ou muito pequeno.")
+        mp3_path.write_bytes(audio_bytes)
+    except Exception as e:
+        return jsonify(error="falha ElevenLabs", detalhe=str(e)), 500
+
+    try:
+        drive = get_drive_service()
+        root_folder = criar_pasta_se_preciso(GOOGLE_DRIVE_ROOT_FOLDER, drive)
+        subfolder_id = criar_subpasta(slug, drive, root_folder)
+        subpastas_por_slug[slug] = subfolder_id
+        upload_para_drive(mp3_path, mp3_path.name, root_folder, drive)
+    except Exception as e:
+        return jsonify(error="falha no upload do MP3 para o Drive", detalhe=str(e)), 500
+
+    return jsonify(
+        audio_url=str(mp3_path.resolve()),
+        slug=slug,
+        drive_folder_url=f"https://drive.google.com/drive/folders/{subfolder_id}"
+    )
+
 @app.route("/transcrever", methods=["POST"])
 def transcrever():
     data = request.get_json(force=True) or {}
@@ -136,8 +175,11 @@ def transcrever():
             response_format="srt"
         )
         blocks = []
-        for blk in raw_srt.strip().split("\n\n"):
-            parts = blk.split("\n")
+        for blk in raw_srt.strip().split("
+
+"):
+            parts = blk.split("
+")
             if len(parts) < 3:
                 continue
             st, en = parts[1].split(" --> ")
@@ -154,8 +196,6 @@ def transcrever():
             fobj.close()
         except:
             pass
-
-
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
