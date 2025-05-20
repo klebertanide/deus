@@ -161,16 +161,15 @@ def transcrever():
             response_format="srt"
         )
         blocks = []
-            for blk in raw_srt.strip().split("\n\n"):
+        for blk in raw_srt.strip().split("\n\n"):
             parts = blk.split("\n")
             if len(parts) < 3:
-        continue
+                continue
             st, en = parts[1].split(" --> ")
             txt = " ".join(parts[2:])
             inicio = parse_ts(st)
             fim = parse_ts(en)
             blocks.append((inicio, fim, txt))
-
         total = blocks[-1][1] if blocks else 0
         return jsonify(transcricao=[{"inicio": i, "fim": f, "texto": t} for i, f, t in blocks], duracao_total=total)
     except Exception as e:
