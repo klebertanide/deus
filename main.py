@@ -175,11 +175,8 @@ def transcrever():
             response_format="srt"
         )
         blocks = []
-        for blk in raw_srt.strip().split("
-
-"):
-            parts = blk.split("
-")
+        for blk in raw_srt.strip().split("\n\n"):
+            parts = blk.split("\n")
             if len(parts) < 3:
                 continue
             st, en = parts[1].split(" --> ")
