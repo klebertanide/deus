@@ -17,14 +17,10 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
 app = Flask(__name__)
-
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
 GOOGLE_DRIVE_ROOT_FOLDER = "1d6RxnsYRS52oKUPGyuAfJZ00bksUUVI2"
 SERVICE_ACCOUNT_FILE     = "/etc/secrets/service_account.json"
 ELEVEN_API_KEY           = os.getenv("ELEVENLABS_API_KEY")
-
-subpastas_por_slug = {}  # cache temporário por request
 
 def get_drive_service():
     creds = service_account.Credentials.from_service_account_file(
@@ -33,39 +29,17 @@ def get_drive_service():
     )
     return build("drive", "v3", credentials=creds)
 
-def criar_pasta_se_preciso(pasta_alvo, drive):
-    try:
-        drive.files().get(fileId=pasta_alvo, fields="id").execute()
-    except HttpError:
-        meta = {
-            "name": "DEUS_TTS_AUTOGERADA",
-            "mimeType": "application/vnd.google-apps.folder"
-        }
-        pasta_alvo = drive.files().create(body=meta).execute()["id"]
-    return pasta_alvo
-
-def criar_subpasta(slug: str, drive, parent_folder_id: str):
+def criar_subpasta(nome: str, drive, parent_folder_id: str):
     meta = {
-        "name": slug,
+        "name": nome,
         "mimeType": "application/vnd.google-apps.folder",
         "parents": [parent_folder_id]
     }
     return drive.files().create(body=meta).execute()["id"]
 
 def upload_para_drive(path: Path, nome: str, folder_id: str, drive):
-    global subpastas_por_slug
-    slug = nome.split("_")[0]
-    if slug in subpastas_por_slug:
-        final_folder_id = subpastas_por_slug[slug]
-    else:
-        final_folder_id = criar_subpasta(slug, drive, folder_id)
-        subpastas_por_slug[slug] = final_folder_id
-
     media = MediaFileUpload(str(path), resumable=True)
-    drive.files().create(
-        body={"name": nome, "parents": [final_folder_id]},
-        media_body=media
-    ).execute()
+    drive.files().create(body={"name": nome, "parents": [folder_id]}, media_body=media).execute()
 
 def gerar_slug():
     return datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + str(uuid.uuid4())[:6]
@@ -94,12 +68,7 @@ def elevenlabs_tts(text: str) -> bytes:
     }
     for tentativa in range(2):
         try:
-            r = requests.post(
-                "https://api.elevenlabs.io/v1/text-to-speech/cwIsrQsWEVTols6slKYN",
-                headers=headers,
-                json=payload,
-                timeout=60
-            )
+            r = requests.post("https://api.elevenlabs.io/v1/text-to-speech/cwIsrQsWEVTols6slKYN", headers=headers, json=payload, timeout=60)
             r.raise_for_status()
             return r.content
         except Exception as e:
@@ -113,21 +82,15 @@ def parse_ts(ts: str) -> float:
 
 @app.route("/falar", methods=["POST"])
 def falar():
-    global subpastas_por_slug
-    subpastas_por_slug = {}
-
     data = request.get_json(force=True) or {}
     texto = data.get("texto")
     if not texto:
         return jsonify(error="campo 'texto' obrigatório"), 400
 
     slug = slugify(texto)
-    mp3_path = Path("saida") / f"{slug}_audio.mp3"
-    mp3_path.parent.mkdir(parents=True, exist_ok=True)
+    mp3_path = Path(f"{slug}_audio.mp3")
 
     try:
-        if not ELEVEN_API_KEY:
-            raise Exception("ELEVEN_API_KEY não está definido")
         audio_bytes = elevenlabs_tts(texto)
         if not audio_bytes or len(audio_bytes) < 1000:
             raise Exception("Áudio gerado é vazio ou muito pequeno.")
@@ -137,18 +100,12 @@ def falar():
 
     try:
         drive = get_drive_service()
-        root_folder = criar_pasta_se_preciso(GOOGLE_DRIVE_ROOT_FOLDER, drive)
-        subfolder_id = criar_subpasta(slug, drive, root_folder)
-        subpastas_por_slug[slug] = subfolder_id
-        upload_para_drive(mp3_path, mp3_path.name, root_folder, drive)
+        folder_id = criar_subpasta(slug, drive, GOOGLE_DRIVE_ROOT_FOLDER)
+        upload_para_drive(mp3_path, mp3_path.name, folder_id, drive)
     except Exception as e:
         return jsonify(error="falha no upload do MP3 para o Drive", detalhe=str(e)), 500
 
-    return jsonify(
-        audio_url=str(mp3_path.resolve()),
-        slug=slug,
-        drive_folder_url=f"https://drive.google.com/drive/folders/{subfolder_id}"
-    )
+    return jsonify(audio_url=str(mp3_path.resolve()), slug=slug, folder_id=folder_id)
 
 @app.route("/transcrever", methods=["POST"])
 def transcrever():
@@ -169,11 +126,7 @@ def transcrever():
         return jsonify(error="falha ao carregar áudio", detalhe=str(e)), 400
 
     try:
-        raw_srt = client.audio.transcriptions.create(
-            model="whisper-1",
-            file=fobj,
-            response_format="srt"
-        )
+        raw_srt = client.audio.transcriptions.create(model="whisper-1", file=fobj, response_format="srt")
         blocks = []
         for blk in raw_srt.strip().split("\n\n"):
             parts = blk.split("\n")
@@ -189,10 +142,35 @@ def transcrever():
     except Exception as e:
         return jsonify(error="falha na transcrição", detalhe=str(e)), 500
     finally:
-        try:
-            fobj.close()
-        except:
-            pass
+        try: fobj.close()
+        except: pass
+
+@app.route("/gerar_csv", methods=["POST"])
+def gerar_csv():
+    data = request.get_json(force=True) or {}
+    transcricao = data.get("transcricao")
+    prompts = data.get("prompts")
+    texto_original = data.get("texto_original")
+
+    if not transcricao or not prompts or not texto_original:
+        return jsonify(error="transcricao, prompts e texto_original são obrigatórios"), 400
+
+    slug = slugify(texto_original)
+    drive = get_drive_service()
+    pasta_id = criar_subpasta(slug, drive, GOOGLE_DRIVE_ROOT_FOLDER)
+
+    # CSV
+    csv_path = Path(f"{slug}_prompts.csv")
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["inicio", "fim", "texto", "prompt"])
+        for linha, prompt in zip(transcricao, prompts):
+            writer.writerow([linha["inicio"], linha["fim"], linha["texto"], prompt])
+
+    # Upload
+    upload_para_drive(csv_path, csv_path.name, pasta_id, drive)
+
+    return jsonify(slug=slug, folder_url=f"https://drive.google.com/drive/folders/{pasta_id}")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
