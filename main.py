@@ -160,7 +160,7 @@ def transcrever():
             response_format="srt"
         )
         blocks = []
-        for blk in raw_srt.strip().split("
+        for blk in raw_srt.strip().split("\n\n"):
 
 "):
             parts = blk.split("
