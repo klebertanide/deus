@@ -203,6 +203,7 @@ def gerar_csv():
     prompts = data.get("prompts")
     texto_original = data.get("texto_original")
     slug = data.get("slug")
+    aspect_ratio = data.get("aspect_ratio", "9:16")  # Padrão 9:16 se não especificado
 
     if not transcricao or not prompts:
         return jsonify(error="transcricao e prompts são obrigatórios"), 400
@@ -217,13 +218,41 @@ def gerar_csv():
         drive = get_drive_service()
         pasta_id = criar_subpasta(slug, drive, GOOGLE_DRIVE_ROOT_FOLDER)
 
-        # CSV
+        # CSV no formato exato do modelo
         csv_path = Path(f"{slug}_prompts.csv")
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow(["inicio", "fim", "texto", "prompt"])
-            for linha, prompt in zip(transcricao, prompts):
-                writer.writerow([linha["inicio"], linha["fim"], linha["texto"], prompt])
+            # Cabeçalho exato conforme o modelo
+            writer.writerow([
+                "Prompt", "Visibility", "Aspect_ratio", "Magic_prompt", "Model", 
+                "Seed_number", "Rendering", "Negative_prompt", "Style", "color_palette", "Num_images"
+            ])
+            
+            # Valores padrão para as colunas fixas
+            negative_prompt = "low quality, overexposed, underexposed, extra limbs, extra fingers, missing fingers, disfigured, deformed, bad anatomy, realistic style, photographic style"
+            
+            # Para cada linha de transcrição e prompt
+            for linha, prompt_texto in zip(transcricao, prompts):
+                # Formatar o tempo de início (t) para o formato correto
+                tempo_inicio = f"t={linha['inicio']:.2f}s"
+                
+                # Construir o prompt completo: tempo + prompt + informações de aquarela
+                prompt_completo = f"{tempo_inicio}, {prompt_texto}, watercolor style, vibrant colors, artistic composition"
+                
+                # Escrever a linha com todos os valores conforme o modelo
+                writer.writerow([
+                    prompt_completo,  # Prompt completo com tempo, texto e aquarela
+                    "private",        # Visibility
+                    aspect_ratio,     # Aspect_ratio (9:16 por padrão)
+                    "on",             # Magic_prompt
+                    "3",              # Model
+                    "",               # Seed_number (vazio)
+                    "TURBO",          # Rendering
+                    negative_prompt,  # Negative_prompt
+                    "auto",           # Style
+                    "",               # color_palette (vazio)
+                    "4"               # Num_images
+                ])
 
         # Upload
         upload_para_drive(csv_path, csv_path.name, pasta_id, drive)
