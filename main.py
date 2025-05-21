@@ -261,7 +261,7 @@ def gerar_csv():
                 tempo_inicio = f"{tempo}"
                 
                 # Construir o prompt completo: tempo + prompt + informações de aquarela
-                prompt_completo = f"{tempo_inicio}, {prompt_texto}, watercolor style, vibrant colors, artistic composition"
+                prompt_completo = f"{tempo_inicio}, {prompt_texto}, Delicate watercolor painting with expressive brush strokes and visible paper texture. Vibrant and harmonious color palette blending soft pastels with bold hues. Artistic composition that evokes emotion and depth, featuring flowing pigments, subtle gradients, and organic imperfections. Emphasize the handcrafted feel, with layered translucency and a poetic atmosphere."
                 
                 # Escrever a linha com todos os valores conforme o modelo
                 writer.writerow([
