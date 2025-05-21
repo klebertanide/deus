@@ -19,31 +19,17 @@ from googleapiclient.http import MediaFileUpload
 app = Flask(__name__)
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 GOOGLE_DRIVE_ROOT_FOLDER = "1d6RxnsYRS52oKUPGyuAfJZ00bksUUVI2"
-SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_FILE", "/etc/secrets/service_account.json")
-ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+SERVICE_ACCOUNT_FILE     = "/etc/secrets/service_account.json"
+ELEVEN_API_KEY           = os.getenv("ELEVENLABS_API_KEY")
 
 def get_drive_service():
-    try:
-        # Verificar se o arquivo de credenciais existe
-        if not os.path.exists(SERVICE_ACCOUNT_FILE):
-            print(f"AVISO: Arquivo de credenciais não encontrado: {SERVICE_ACCOUNT_FILE}")
-            print("Upload para o Google Drive será desativado.")
-            return None
-            
-        creds = service_account.Credentials.from_service_account_file(
-            SERVICE_ACCOUNT_FILE,
-            scopes=["https://www.googleapis.com/auth/drive"]
-        )
-        return build("drive", "v3", credentials=creds)
-    except Exception as e:
-        print(f"Erro ao configurar serviço do Drive: {e}")
-        return None
+    creds = service_account.Credentials.from_service_account_file(
+        SERVICE_ACCOUNT_FILE,
+        scopes=["https://www.googleapis.com/auth/drive"]
+    )
+    return build("drive", "v3", credentials=creds)
 
 def criar_subpasta(nome: str, drive, parent_folder_id: str):
-    # Se o drive for None, retorna None (modo offline)
-    if drive is None:
-        return None
-        
     # Verificar se a pasta já existe
     try:
         results = drive.files().list(
@@ -55,35 +41,20 @@ def criar_subpasta(nome: str, drive, parent_folder_id: str):
         items = results.get('files', [])
         if items:
             return items[0]['id']
-    except Exception as e:
-        print(f"Erro ao verificar pasta existente: {e}")
+    except Exception:
         pass  # Se falhar, continua e cria uma nova pasta
     
     # Criar nova pasta
-    try:
-        meta = {
-            "name": nome,
-            "mimeType": "application/vnd.google-apps.folder",
-            "parents": [parent_folder_id]
-        }
-        return drive.files().create(body=meta).execute()["id"]
-    except Exception as e:
-        print(f"Erro ao criar pasta: {e}")
-        return None
+    meta = {
+        "name": nome,
+        "mimeType": "application/vnd.google-apps.folder",
+        "parents": [parent_folder_id]
+    }
+    return drive.files().create(body=meta).execute()["id"]
 
 def upload_para_drive(path: Path, nome: str, folder_id: str, drive):
-    # Se o drive for None ou folder_id for None, pula o upload (modo offline)
-    if drive is None or folder_id is None:
-        print(f"Upload para Drive desativado. Arquivo salvo localmente: {path}")
-        return False
-        
-    try:
-        media = MediaFileUpload(str(path), resumable=True)
-        drive.files().create(body={"name": nome, "parents": [folder_id]}, media_body=media).execute()
-        return True
-    except Exception as e:
-        print(f"Erro ao fazer upload do arquivo {nome}: {e}")
-        return False
+    media = MediaFileUpload(str(path), resumable=True)
+    drive.files().create(body={"name": nome, "parents": [folder_id]}, media_body=media).execute()
 
 def gerar_slug():
     return datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + str(uuid.uuid4())[:6]
@@ -95,10 +66,6 @@ def slugify(text: str, limit: int = 30) -> str:
     return txt[:limit] if txt else gerar_slug()
 
 def elevenlabs_tts(text: str) -> bytes:
-    # Verificar se a chave da API está configurada
-    if not ELEVEN_API_KEY:
-        raise Exception("ELEVENLABS_API_KEY não configurada. Configure a variável de ambiente.")
-        
     headers = {
         "xi-api-key": ELEVEN_API_KEY,
         "Content-Type": "application/json"
@@ -121,16 +88,12 @@ def elevenlabs_tts(text: str) -> bytes:
             return r.content
         except Exception as e:
             if tentativa == 1:
-                raise Exception(f"Erro na API ElevenLabs: {str(e)}")
+                raise e
 
 def parse_ts(ts: str) -> float:
-    try:
-        h, m, rest = ts.split(":")
-        s, ms = rest.split(",")
-        return int(h)*3600 + int(m)*60 + int(s) + int(ms)/1000
-    except Exception as e:
-        print(f"Erro ao analisar timestamp {ts}: {e}")
-        return 0.0
+    h, m, rest = ts.split(":")
+    s, ms = rest.split(",")
+    return int(h)*3600 + int(m)*60 + int(s) + int(ms)/1000
 
 @app.route("/falar", methods=["POST"])
 def falar():
@@ -158,29 +121,19 @@ def falar():
     except Exception as e:
         return jsonify(error="falha ElevenLabs", detalhe=str(e)), 500
 
-    # Inicializar drive e fazer upload (se possível)
-    drive = get_drive_service()
-    folder_id = None
-    
-    if drive:
-        try:
-            folder_id = criar_subpasta(slug, drive, GOOGLE_DRIVE_ROOT_FOLDER)
-            
-            # Upload do MP3
-            upload_para_drive(mp3_path, mp3_path.name, folder_id, drive)
-            
-            # Upload do TXT com o texto original
-            upload_para_drive(txt_path, txt_path.name, folder_id, drive)
-        except Exception as e:
-            print(f"Aviso: falha no upload para o Drive: {e}")
-            # Continua mesmo com erro no upload
+    try:
+        drive = get_drive_service()
+        folder_id = criar_subpasta(slug, drive, GOOGLE_DRIVE_ROOT_FOLDER)
+        
+        # Upload do MP3
+        upload_para_drive(mp3_path, mp3_path.name, folder_id, drive)
+        
+        # Upload do TXT com o texto original
+        upload_para_drive(txt_path, txt_path.name, folder_id, drive)
+    except Exception as e:
+        return jsonify(error="falha no upload para o Drive", detalhe=str(e)), 500
 
-    return jsonify(
-        audio_url=str(mp3_path.resolve()), 
-        slug=slug, 
-        folder_id=folder_id,
-        drive_enabled=drive is not None
-    )
+    return jsonify(audio_url=str(mp3_path.resolve()), slug=slug, folder_id=folder_id)
 
 @app.route("/transcrever", methods=["POST"])
 def transcrever():
@@ -209,10 +162,6 @@ def transcrever():
         return jsonify(error="falha ao carregar áudio", detalhe=str(e)), 400
 
     try:
-        # Verificar se a chave da API OpenAI está configurada
-        if not os.getenv("OPENAI_API_KEY"):
-            return jsonify(error="OPENAI_API_KEY não configurada. Configure a variável de ambiente."), 500
-            
         raw_srt = client.audio.transcriptions.create(model="whisper-1", file=fobj, response_format="srt")
         blocks = []
         for blk in raw_srt.strip().split("\n\n"):
@@ -231,24 +180,16 @@ def transcrever():
         with open(srt_path, "w", encoding="utf-8") as f:
             f.write(raw_srt)
         
-        # Upload do SRT para o Drive (se possível)
-        drive = get_drive_service()
-        folder_id = None
+        # Upload do SRT para o Drive
+        try:
+            drive = get_drive_service()
+            folder_id = criar_subpasta(slug, drive, GOOGLE_DRIVE_ROOT_FOLDER)
+            upload_para_drive(srt_path, srt_path.name, folder_id, drive)
+        except Exception as e:
+            print(f"Erro ao fazer upload do SRT: {e}")
+            # Continua mesmo com erro no upload
         
-        if drive:
-            try:
-                folder_id = criar_subpasta(slug, drive, GOOGLE_DRIVE_ROOT_FOLDER)
-                upload_para_drive(srt_path, srt_path.name, folder_id, drive)
-            except Exception as e:
-                print(f"Aviso: erro ao fazer upload do SRT: {e}")
-                # Continua mesmo com erro no upload
-        
-        return jsonify(
-            transcricao=[{"inicio": i, "fim": f, "texto": t} for i, f, t in blocks], 
-            duracao_total=total, 
-            slug=slug,
-            drive_enabled=drive is not None
-        )
+        return jsonify(transcricao=[{"inicio": i, "fim": f, "texto": t} for i, f, t in blocks], duracao_total=total, slug=slug)
     except Exception as e:
         return jsonify(error="falha na transcrição", detalhe=str(e)), 500
     finally:
@@ -274,6 +215,9 @@ def gerar_csv():
         slug = slugify(texto_original)
 
     try:
+        drive = get_drive_service()
+        pasta_id = criar_subpasta(slug, drive, GOOGLE_DRIVE_ROOT_FOLDER)
+
         # CSV no formato exato do modelo
         csv_path = Path(f"{slug}_prompts.csv")
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
@@ -290,8 +234,7 @@ def gerar_csv():
             # Para cada linha de transcrição e prompt
             for linha, prompt_texto in zip(transcricao, prompts):
                 # Formatar o tempo de início (t) para o formato correto
-                 tempo_inicio = f"{round(linha['inicio'])}"
-               
+                tempo_inicio = f"t={linha['inicio']:.2f}s"
                 
                 # Construir o prompt completo: tempo + prompt + informações de aquarela
                 prompt_completo = f"{tempo_inicio}, {prompt_texto}, watercolor style, vibrant colors, artistic composition"
@@ -311,58 +254,13 @@ def gerar_csv():
                     "4"               # Num_images
                 ])
 
-        # Upload para o Drive (se possível)
-        drive = get_drive_service()
-        folder_id = None
-        
-        if drive:
-            try:
-                folder_id = criar_subpasta(slug, drive, GOOGLE_DRIVE_ROOT_FOLDER)
-                upload_para_drive(csv_path, csv_path.name, folder_id, drive)
-            except Exception as e:
-                print(f"Aviso: erro ao fazer upload do CSV: {e}")
-                # Continua mesmo com erro no upload
+        # Upload
+        upload_para_drive(csv_path, csv_path.name, pasta_id, drive)
 
-        return jsonify(
-            slug=slug, 
-            csv_path=str(csv_path.resolve()),
-            folder_id=folder_id,
-            folder_url=f"https://drive.google.com/drive/folders/{folder_id}" if folder_id else None,
-            drive_enabled=drive is not None
-        )
+        return jsonify(slug=slug, folder_url=f"https://drive.google.com/drive/folders/{pasta_id}")
     except Exception as e:
         return jsonify(error="falha ao gerar CSV ou fazer upload", detalhe=str(e)), 500
 
-@app.route("/", methods=["GET"])
-def status():
-    """Rota para verificar o status da API e das integrações"""
-    status = {
-        "status": "online",
-        "timestamp": datetime.now().isoformat(),
-        "integracoes": {
-            "elevenlabs": ELEVEN_API_KEY is not None,
-            "openai": os.getenv("OPENAI_API_KEY") is not None,
-            "google_drive": os.path.exists(SERVICE_ACCOUNT_FILE)
-        }
-    }
-    return jsonify(status)
-
 if __name__ == "__main__":
-    # Verificar e avisar sobre variáveis de ambiente ausentes
-    missing_vars = []
-    if not os.getenv("OPENAI_API_KEY"):
-        missing_vars.append("OPENAI_API_KEY")
-    if not ELEVEN_API_KEY:
-        missing_vars.append("ELEVENLABS_API_KEY")
-    if not os.path.exists(SERVICE_ACCOUNT_FILE):
-        missing_vars.append(f"SERVICE_ACCOUNT_FILE ({SERVICE_ACCOUNT_FILE})")
-    
-    if missing_vars:
-        print("AVISO: As seguintes variáveis de ambiente ou arquivos estão ausentes:")
-        for var in missing_vars:
-            print(f"  - {var}")
-        print("Algumas funcionalidades podem não estar disponíveis.")
-    
     port = int(os.environ.get("PORT", 5000))
-    print(f"Iniciando servidor na porta {port}...")
     app.run(host="0.0.0.0", port=port)
