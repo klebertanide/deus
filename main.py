@@ -244,15 +244,10 @@ def gerar_csv():
                 # Encontrar o tempo fixo mais próximo do início do bloco
                 tempo_mais_proximo = min(tempos_fixos, key=lambda t: abs(t - bloco["inicio"]))
                 
-                # Se este tempo já foi usado, pegar o próximo disponível
+                # Se este tempo já foi usado, usar o próximo tempo sequencial
                 while tempo_mais_proximo in [p[0] for p in prompts_com_tempo]:
-                    # Encontrar o próximo tempo disponível
-                    tempos_disponiveis = [t for t in tempos_fixos if t > tempo_mais_proximo and t not in [p[0] for p in prompts_com_tempo]]
-                    if tempos_disponiveis:
-                        tempo_mais_proximo = min(tempos_disponiveis)
-                    else:
-                        # Se não houver mais tempos disponíveis, criar um novo
-                        tempo_mais_proximo = max([p[0] for p in prompts_com_tempo]) + intervalo_segundos
+                    tempo_mais_proximo += intervalo_segundos
+                    if tempo_mais_proximo not in tempos_fixos:
                         tempos_fixos.append(tempo_mais_proximo)
                 
                 prompts_com_tempo.append((tempo_mais_proximo, prompt_texto, bloco))
