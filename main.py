@@ -230,7 +230,7 @@ def gerar_csv():
             ])
             
             # Valores padrão para as colunas fixas
-            negative_prompt = "low quality, overexposed, underexposed, extra limbs, extra fingers, missing fingers, disfigured, deformed, bad anatomy, realistic style, photographic style"
+            negative_prompt = "text, words, text phrase, low quality, overexposed, underexposed, extra limbs, extra fingers, missing fingers, disfigured, deformed, bad anatomy, realistic style, photographic style"
             
             # Calcular a duração total do áudio
             duracao_total = max([bloco["fim"] for bloco in transcricao]) if transcricao else 0
