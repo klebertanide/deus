@@ -204,6 +204,7 @@ def gerar_csv():
     texto_original = data.get("texto_original")
     slug = data.get("slug")
     aspect_ratio = data.get("aspect_ratio", "9:16")  # Padrão 9:16 se não especificado
+    intervalo_segundos = data.get("intervalo_segundos", 4)  # Intervalo fixo entre prompts, padrão 4 segundos
 
     if not transcricao or not prompts:
         return jsonify(error="transcricao e prompts são obrigatórios"), 400
@@ -231,9 +232,38 @@ def gerar_csv():
             # Valores padrão para as colunas fixas
             negative_prompt = "low quality, overexposed, underexposed, extra limbs, extra fingers, missing fingers, disfigured, deformed, bad anatomy, realistic style, photographic style"
             
-            # Para cada linha de transcrição e prompt
-            for linha, prompt_texto in zip(transcricao, prompts):
-                tempo_inicio = f"{int(linha['inicio'])}"
+            # Calcular a duração total do áudio
+            duracao_total = max([bloco["fim"] for bloco in transcricao]) if transcricao else 0
+            
+            # Gerar tempos em intervalos fixos de 4 segundos
+            tempos_fixos = list(range(0, math.ceil(duracao_total), intervalo_segundos))
+            
+            # Associar cada prompt ao tempo fixo mais próximo
+            prompts_com_tempo = []
+            for i, (prompt_texto, bloco) in enumerate(zip(prompts, transcricao)):
+                # Encontrar o tempo fixo mais próximo do início do bloco
+                tempo_mais_proximo = min(tempos_fixos, key=lambda t: abs(t - bloco["inicio"]))
+                
+                # Se este tempo já foi usado, pegar o próximo disponível
+                while tempo_mais_proximo in [p[0] for p in prompts_com_tempo]:
+                    # Encontrar o próximo tempo disponível
+                    tempos_disponiveis = [t for t in tempos_fixos if t > tempo_mais_proximo and t not in [p[0] for p in prompts_com_tempo]]
+                    if tempos_disponiveis:
+                        tempo_mais_proximo = min(tempos_disponiveis)
+                    else:
+                        # Se não houver mais tempos disponíveis, criar um novo
+                        tempo_mais_proximo = max([p[0] for p in prompts_com_tempo]) + intervalo_segundos
+                        tempos_fixos.append(tempo_mais_proximo)
+                
+                prompts_com_tempo.append((tempo_mais_proximo, prompt_texto, bloco))
+            
+            # Ordenar por tempo
+            prompts_com_tempo.sort(key=lambda x: x[0])
+            
+            # Escrever no CSV
+            for tempo, prompt_texto, bloco in prompts_com_tempo:
+                # Formatar o tempo de início como inteiro
+                tempo_inicio = f"{tempo}"
                 
                 # Construir o prompt completo: tempo + prompt + informações de aquarela
                 prompt_completo = f"{tempo_inicio}, {prompt_texto}, watercolor style, vibrant colors, artistic composition"
@@ -246,7 +276,7 @@ def gerar_csv():
                     "on",             # Magic_prompt
                     "3",              # Model
                     "",               # Seed_number (vazio)
-                    "QUALITY",          # Rendering
+                    "QUALITY",        # Rendering
                     negative_prompt,  # Negative_prompt
                     "auto",           # Style
                     "",               # color_palette (vazio)
@@ -256,7 +286,12 @@ def gerar_csv():
         # Upload
         upload_para_drive(csv_path, csv_path.name, pasta_id, drive)
 
-        return jsonify(slug=slug, folder_url=f"https://drive.google.com/drive/folders/{pasta_id}")
+        return jsonify(
+            slug=slug, 
+            folder_url=f"https://drive.google.com/drive/folders/{pasta_id}",
+            intervalo_segundos=intervalo_segundos,
+            num_prompts=len(prompts_com_tempo)
+        )
     except Exception as e:
         return jsonify(error="falha ao gerar CSV ou fazer upload", detalhe=str(e)), 500
 
