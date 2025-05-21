@@ -234,7 +234,7 @@ def gerar_csv():
             # Para cada linha de transcrição e prompt
             for linha, prompt_texto in zip(transcricao, prompts):
                 # Formatar o tempo de início (t) para o formato correto
-                tempo_inicio = f"{round(linha['inicio']:}"
+                tempo_inicio = f"{linha['inicio']:}
                 
                 # Construir o prompt completo: tempo + prompt + informações de aquarela
                 prompt_completo = f"{tempo_inicio}, {prompt_texto}, watercolor style, vibrant colors, artistic composition"
