@@ -247,11 +247,11 @@ def gerar_csv():
                     "on",             # Magic_prompt
                     "3",              # Model
                     "",               # Seed_number (vazio)
-                    "TURBO",          # Rendering
+                    "QUALITY",          # Rendering
                     negative_prompt,  # Negative_prompt
                     "auto",           # Style
                     "",               # color_palette (vazio)
-                    "4"               # Num_images
+                    "1"               # Num_images
                 ])
 
         # Upload
