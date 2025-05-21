@@ -230,7 +230,7 @@ def gerar_csv():
             ])
             
             # Valores padrão para as colunas fixas
-            negative_prompt = "text, words, text phrase, low quality, overexposed, underexposed, extra limbs, extra fingers, missing fingers, disfigured, deformed, bad anatomy, realistic style, photographic style"
+            negative_prompt = "words, sentences, texts, paragraphs, letters, numbers, syllables, low quality, overexposed, underexposed, extra limbs, extra fingers, missing fingers, disfigured, deformed, bad anatomy, realistic style, photographic style, 3d, 3d render"
             
             # Calcular a duração total do áudio
             duracao_total = max([bloco["fim"] for bloco in transcricao]) if transcricao else 0
@@ -261,7 +261,7 @@ def gerar_csv():
                 tempo_inicio = f"{tempo}"
                 
                 # Construir o prompt completo: tempo + prompt + informações de aquarela
-                prompt_completo = f"{tempo_inicio}, {prompt_texto}, Delicate watercolor painting with expressive brush strokes and visible paper texture. Vibrant and harmonious color palette blending soft pastels with bold hues. Artistic composition that evokes emotion and depth, featuring flowing pigments, subtle gradients, and organic imperfections. Emphasize the handcrafted feel, with layered translucency and a poetic atmosphere."
+                prompt_completo = f"{tempo_inicio}, {prompt_texto}, Delicate 2d watercolor painting with expressive brush strokes and visible paper texture. Vibrant and harmonious color palette blending soft pastels with bold hues. Artistic composition that evokes emotion and depth, featuring flowing pigments, subtle gradients, and organic imperfections. Emphasize the handcrafted feel, with layered translucency and a poetic atmosphere."
                 
                 # Escrever a linha com todos os valores conforme o modelo
                 writer.writerow([
