@@ -69,17 +69,17 @@ def slugify(text: str, limit: int = 30) -> str:
 
 def elevenlabs_tts(text: str) -> bytes:
     headers = {"xi-api-key": ELEVEN_API_KEY, "Content-Type": "application/json"}
+    voice_id = "cwIsrQsWEVTols6slKYN"
     payload = {
         "text": text,
         "voice_settings": {"stability": 0.6, "similarity_boost": 0.9, "style": 0.15, "use_speaker_boost": True},
         "model_id": "eleven_multilingual_v2",
-        "voice_id": "cwIsrQsWEVTols6slKYN"
+        "voice_id": voice_id
     }
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
     for tentativa in range(2):
         try:
-            r = requests.post(
-                "https://api.elevenlabs.io/v1/text-to-speech/cwIsrQsWEVTolsUUdenNNN", headers=headers, json=payload, timeout=60
-            )
+            r = requests.post(url, headers=headers, json=payload, timeout=60)
             r.raise_for_status()
             return r.content
         except Exception as e:
@@ -92,12 +92,10 @@ def parse_ts(ts: str) -> float:
     s, ms = rest.split(",")
     return int(h)*3600 + int(m)*60 + int(s) + int(ms)/1000
 
-
 # Health check endpoint
 @app.route("/", methods=["GET"], strict_slashes=False)
 def health_check():
     return jsonify(status="ok"), 200
-
 
 # CSV generation endpoint
 @app.route("/gerar_csv", methods=["GET", "POST"], strict_slashes=False)
