@@ -204,7 +204,7 @@ def gerar_csv():
     texto_original = data.get("texto_original")
     slug = data.get("slug")
     aspect_ratio = data.get("aspect_ratio", "9:16")  # Padrão 9:16 se não especificado
-    intervalo_segundos = data.get("intervalo_segundos", 3)  # Intervalo fixo entre prompts, padrão 4 segundos
+    intervalo_segundos = data.get("intervalo_segundos", 4)  # Intervalo fixo entre prompts, padrão 4 segundos
 
     if not transcricao or not prompts:
         return jsonify(error="transcricao e prompts são obrigatórios"), 400
