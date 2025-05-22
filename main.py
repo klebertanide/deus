@@ -22,12 +22,14 @@ GOOGLE_DRIVE_ROOT_FOLDER = "1d6RxnsYRS52oKUPGyuAfJZ00bksUUVI2"
 SERVICE_ACCOUNT_FILE     = "/etc/secrets/service_account.json"
 ELEVEN_API_KEY           = os.getenv("ELEVENLABS_API_KEY")
 
+
 def get_drive_service():
     creds = service_account.Credentials.from_service_account_file(
         SERVICE_ACCOUNT_FILE,
         scopes=["https://www.googleapis.com/auth/drive"]
     )
     return build("drive", "v3", credentials=creds)
+
 
 def criar_subpasta(nome: str, drive, parent_folder_id: str):
     try:
@@ -48,18 +50,22 @@ def criar_subpasta(nome: str, drive, parent_folder_id: str):
     }
     return drive.files().create(body=meta).execute()["id"]
 
+
 def upload_para_drive(path: Path, nome: str, folder_id: str, drive):
     media = MediaFileUpload(str(path), resumable=True)
     drive.files().create(body={"name": nome, "parents": [folder_id]}, media_body=media).execute()
 
+
 def gerar_slug():
     return datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + str(uuid.uuid4())[:6]
+
 
 def slugify(text: str, limit: int = 30) -> str:
     txt = unidecode.unidecode(text or "")
     txt = re.sub(r"[^\w\s]", "", txt)
     txt = txt.strip().replace(" ", "_").lower()
     return txt[:limit] if txt else gerar_slug()
+
 
 def elevenlabs_tts(text: str) -> bytes:
     headers = {"xi-api-key": ELEVEN_API_KEY, "Content-Type": "application/json"}
@@ -80,18 +86,25 @@ def elevenlabs_tts(text: str) -> bytes:
             if tentativa == 1:
                 raise e
 
+
 def parse_ts(ts: str) -> float:
     h, m, rest = ts.split(":")
     s, ms = rest.split(",")
     return int(h)*3600 + int(m)*60 + int(s) + int(ms)/1000
 
-@app.route("/gerar_csv", methods=["GET", "POST"])
+
+# Health check endpoint
+@app.route("/", methods=["GET"], strict_slashes=False)
+def health_check():
+    return jsonify(status="ok"), 200
+
+
+# CSV generation endpoint
+@app.route("/gerar_csv", methods=["GET", "POST"], strict_slashes=False)
 def gerar_csv():
-    # Permitir verificação via GET
     if request.method == "GET":
         return jsonify(status="ready"), 200
 
-    # POST gera CSV
     data = request.get_json(force=True) or {}
     transcricao = data.get("transcricao")
     texto_original = data.get("texto_original")
@@ -111,7 +124,7 @@ def gerar_csv():
     pasta_id = criar_subpasta(slug, drive, GOOGLE_DRIVE_ROOT_FOLDER)
     csv_path = Path(f"{slug}_prompts.csv")
 
-    # 1) gerar CSV
+    # 1) gerar CSV file
     try:
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
@@ -171,13 +184,14 @@ def gerar_csv():
         app.logger.exception("Erro no upload para Drive:")
         return jsonify(error="falha no upload para Drive", detalhe=str(e)), 500
 
-    # 3) retorno bem-sucedido
+    # 3) sucesso
     return jsonify(
         slug=slug,
         folder_url=f"https://drive.google.com/drive/folders/{pasta_id}",
         intervalo_segundos=intervalo_segundos,
         num_prompts=len(prompts_com_tempo)
-    )
+    ), 200
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
