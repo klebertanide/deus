@@ -37,13 +37,11 @@ def criar_subpasta(nome: str, drive, parent_folder_id: str):
             spaces='drive',
             fields='files(id, name)'
         ).execute()
-        
         items = results.get('files', [])
         if items:
             return items[0]['id']
     except Exception:
-        pass  # Se falhar, continua e cria uma nova pasta
-    
+        pass
     # Criar nova pasta
     meta = {
         "name": nome,
@@ -83,7 +81,12 @@ def elevenlabs_tts(text: str) -> bytes:
     }
     for tentativa in range(2):
         try:
-            r = requests.post("https://api.elevenlabs.io/v1/text-to-speech/cwIsrQsWEVTols6slKYN", headers=headers, json=payload, timeout=60)
+            r = requests.post(
+                "https://api.elevenlabs.io/v1/text-to-speech/cwIsrQsWEVTols6slKYN",
+                headers=headers,
+                json=payload,
+                timeout=60
+            )
             r.raise_for_status()
             return r.content
         except Exception as e:
@@ -106,7 +109,6 @@ def falar():
     mp3_path = Path(f"{slug}_audio.mp3")
     txt_path = Path(f"{slug}_texto.txt")
 
-    # Salvar o texto original em um arquivo TXT
     try:
         with open(txt_path, "w", encoding="utf-8") as f:
             f.write(texto)
@@ -124,11 +126,7 @@ def falar():
     try:
         drive = get_drive_service()
         folder_id = criar_subpasta(slug, drive, GOOGLE_DRIVE_ROOT_FOLDER)
-        
-        # Upload do MP3
         upload_para_drive(mp3_path, mp3_path.name, folder_id, drive)
-        
-        # Upload do TXT com o texto original
         upload_para_drive(txt_path, txt_path.name, folder_id, drive)
     except Exception as e:
         return jsonify(error="falha no upload para o Drive", detalhe=str(e)), 500
@@ -140,12 +138,11 @@ def transcrever():
     data = request.get_json(force=True) or {}
     audio_ref = data.get("audio_url") or data.get("audio_file")
     slug = data.get("slug")
-    
+
     if not audio_ref:
         return jsonify(error="campo 'audio_url' ou 'audio_file' obrigatório"), 400
-    
+
     if not slug:
-        # Tentar extrair slug do nome do arquivo
         slug = Path(audio_ref).stem
         if "_audio" in slug:
             slug = slug.replace("_audio", "")
@@ -174,22 +171,23 @@ def transcrever():
             fim = parse_ts(en)
             blocks.append((inicio, fim, txt))
         total = blocks[-1][1] if blocks else 0
-        
-        # Salvar o SRT em um arquivo
+
         srt_path = Path(f"{slug}_legenda.srt")
         with open(srt_path, "w", encoding="utf-8") as f:
             f.write(raw_srt)
-        
-        # Upload do SRT para o Drive
+
         try:
             drive = get_drive_service()
             folder_id = criar_subpasta(slug, drive, GOOGLE_DRIVE_ROOT_FOLDER)
             upload_para_drive(srt_path, srt_path.name, folder_id, drive)
         except Exception as e:
             print(f"Erro ao fazer upload do SRT: {e}")
-            # Continua mesmo com erro no upload
-        
-        return jsonify(transcricao=[{"inicio": i, "fim": f, "texto": t} for i, f, t in blocks], duracao_total=total, slug=slug)
+
+        return jsonify(
+            transcricao=[{"inicio": i, "fim": f, "texto": t} for i, f, t in blocks],
+            duracao_total=total,
+            slug=slug
+        )
     except Exception as e:
         return jsonify(error="falha na transcrição", detalhe=str(e)), 500
     finally:
@@ -200,16 +198,14 @@ def transcrever():
 def gerar_csv():
     data = request.get_json(force=True) or {}
     transcricao = data.get("transcricao")
-    prompts = data.get("prompts")
     texto_original = data.get("texto_original")
     slug = data.get("slug")
-    aspect_ratio = data.get("aspect_ratio", "9:16")  # Padrão 9:16 se não especificado
-    intervalo_segundos = data.get("intervalo_segundos", 4)  # Intervalo fixo entre prompts, padrão 4 segundos
+    aspect_ratio = data.get("aspect_ratio", "9:16")
+    intervalo_segundos = data.get("intervalo_segundos", 3)
 
-    if not transcricao or not prompts:
-        return jsonify(error="transcricao e prompts são obrigatórios"), 400
-    
-    # Se não tiver slug nem texto_original, gera um slug aleatório
+    if not transcricao:
+        return jsonify(error="campo 'transcricao' obrigatório"), 400
+
     if not slug and not texto_original:
         slug = gerar_slug()
     elif not slug:
@@ -219,70 +215,62 @@ def gerar_csv():
         drive = get_drive_service()
         pasta_id = criar_subpasta(slug, drive, GOOGLE_DRIVE_ROOT_FOLDER)
 
-        # CSV no formato exato do modelo
         csv_path = Path(f"{slug}_prompts.csv")
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            # Cabeçalho exato conforme o modelo
             writer.writerow([
                 "Prompt", "Visibility", "Aspect_ratio", "Magic_prompt", "Model", 
                 "Seed_number", "Rendering", "Negative_prompt", "Style", "color_palette", "Num_images"
             ])
-            
-            # Valores padrão para as colunas fixas
-            negative_prompt = "words, sentences, texts, paragraphs, letters, numbers, syllables, low quality, overexposed, underexposed, extra limbs, extra fingers, missing fingers, disfigured, deformed, bad anatomy, realistic style, photographic style, 3d, 3d render"
-            
-            # Calcular a duração total do áudio
-            duracao_total = max([bloco["fim"] for bloco in transcricao]) if transcricao else 0
-            
-            # Gerar tempos em intervalos fixos de 4 segundos
+
+            negative_prompt = (
+                "words, sentences, texts, paragraphs, letters, numbers, syllables, "
+                "low quality, overexposed, underexposed, extra limbs, extra fingers, missing fingers, "
+                "disfigured, deformed, bad anatomy, realistic style, photographic style, 3d, 3d render"
+            )
+
+            duracao_total = max([bloco[1] for bloco in transcricao]) if transcricao else 0
             tempos_fixos = list(range(0, math.ceil(duracao_total), intervalo_segundos))
-            
-            # Associar cada prompt ao tempo fixo mais próximo
+
             prompts_com_tempo = []
-            for i, (prompt_texto, bloco) in enumerate(zip(prompts, transcricao)):
-                # Encontrar o tempo fixo mais próximo do início do bloco
-                tempo_mais_proximo = min(tempos_fixos, key=lambda t: abs(t - bloco["inicio"]))
-                
-                # Se este tempo já foi usado, usar o próximo tempo sequencial
-                while tempo_mais_proximo in [p[0] for p in prompts_com_tempo]:
+            for bloco in transcricao:
+                prompt_texto = bloco[2]  # usa o texto da transcrição
+                tempo_mais_proximo = min(tempos_fixos, key=lambda t: abs(t - bloco[0]))
+                used_times = [p[0] for p in prompts_com_tempo]
+                while tempo_mais_proximo in used_times:
                     tempo_mais_proximo += intervalo_segundos
                     if tempo_mais_proximo not in tempos_fixos:
                         tempos_fixos.append(tempo_mais_proximo)
-                
                 prompts_com_tempo.append((tempo_mais_proximo, prompt_texto, bloco))
-            
-            # Ordenar por tempo
+
             prompts_com_tempo.sort(key=lambda x: x[0])
-            
-            # Escrever no CSV
+
             for tempo, prompt_texto, bloco in prompts_com_tempo:
-                # Formatar o tempo de início como inteiro
                 tempo_inicio = f"{tempo}"
-                
-                # Construir o prompt completo: tempo + prompt + informações de aquarela
-                prompt_completo = f"{tempo_inicio}, {prompt_texto}, Delicate 2d watercolor painting with expressive brush strokes and visible paper texture. Color palette blending soft pastels with bold hues. Artistic composition that evokes emotion and depth, featuring flowing pigments, subtle gradients, and organic imperfections. Emphasize the handcrafted feel, with layered translucency and a poetic atmosphere."
-                
-                # Escrever a linha com todos os valores conforme o modelo
+                prompt_completo = (
+                    f"{tempo_inicio}, {prompt_texto}, Delicate 2d watercolor painting with expressive brush strokes "
+                    "and visible paper texture. Color palette blending soft pastels with bold hues. Artistic composition "
+                    "that evokes emotion and depth, featuring flowing pigments, subtle gradients, and organic imperfections. "
+                    "Emphasize the handcrafted feel, with layered translucency and a poetic atmosphere."
+                )
                 writer.writerow([
-                    prompt_completo,  # Prompt completo com tempo, texto e aquarela
-                    "private",        # Visibility
-                    aspect_ratio,     # Aspect_ratio (9:16 por padrão)
-                    "on",             # Magic_prompt
-                    "3",              # Model
-                    "",               # Seed_number (vazio)
-                    "turbo",        # Rendering
-                    negative_prompt,  # Negative_prompt
-                    "design",           # Style
-                    "",               # color_palette (vazio)
-                    "4"               # Num_images
+                    prompt_completo,
+                    "private",
+                    aspect_ratio,
+                    "on",
+                    "3",
+                    "",
+                    "turbo",
+                    negative_prompt,
+                    "design",
+                    "",
+                    "4"
                 ])
 
-        # Upload
         upload_para_drive(csv_path, csv_path.name, pasta_id, drive)
 
         return jsonify(
-            slug=slug, 
+            slug=slug,
             folder_url=f"https://drive.google.com/drive/folders/{pasta_id}",
             intervalo_segundos=intervalo_segundos,
             num_prompts=len(prompts_com_tempo)
