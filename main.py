@@ -85,8 +85,13 @@ def parse_ts(ts: str) -> float:
     s, ms = rest.split(",")
     return int(h)*3600 + int(m)*60 + int(s) + int(ms)/1000
 
-@app.route("/gerar_csv", methods=["POST"])
+@app.route("/gerar_csv", methods=["GET", "POST"])
 def gerar_csv():
+    # Permitir verificação via GET
+    if request.method == "GET":
+        return jsonify(status="ready"), 200
+
+    # POST gera CSV
     data = request.get_json(force=True) or {}
     transcricao = data.get("transcricao")
     texto_original = data.get("texto_original")
