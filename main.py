@@ -19,8 +19,8 @@ from googleapiclient.http import MediaFileUpload
 app = Flask(__name__)
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 GOOGLE_DRIVE_ROOT_FOLDER = "1d6RxnsYRS52oKUPGyuAfJZ00bksUUVI2"
-SERVICE_ACCOUNT_FILE     = "/etc/secrets/service_account.json"
-ELEVEN_API_KEY           = os.getenv("ELEVENLABS_API_KEY")
+SERVICE_ACCOUNT_FILE = "/etc/secrets/service_account.json"
+ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 
 
 def get_drive_service():
@@ -90,39 +90,110 @@ def elevenlabs_tts(text: str) -> bytes:
 def parse_ts(ts: str) -> float:
     h, m, rest = ts.split(":")
     s, ms = rest.split(",")
-    return int(h)*3600 + int(m)*60 + int(s) + int(ms)/1000
+    return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
 
 # Health check endpoint
 @app.route("/", methods=["GET"], strict_slashes=False)
 def health_check():
     return jsonify(status="ok"), 200
 
+# ElevenLabs TTS endpoint
+@app.route("/falar", methods=["POST"], strict_slashes=False)
+def falar():
+    data = request.get_json(force=True) or {}
+    texto = data.get("texto")
+    if not texto:
+        return jsonify(error="campo 'texto' obrigatório"), 400
+    slug = slugify(texto)
+    mp3_path = Path(f"{slug}_audio.mp3")
+    txt_path = Path(f"{slug}_texto.txt")
+    try:
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write(texto)
+    except Exception as e:
+        return jsonify(error="falha ao salvar texto", detalhe=str(e)), 500
+    try:
+        audio_bytes = elevenlabs_tts(texto)
+        if not audio_bytes or len(audio_bytes) < 1000:
+            raise Exception("áudio inválido")
+        mp3_path.write_bytes(audio_bytes)
+    except Exception as e:
+        app.logger.exception("Erro TTS ElevenLabs:")
+        return jsonify(error="falha ElevenLabs", detalhe=str(e)), 500
+    try:
+        drive = get_drive_service()
+        pasta_id = criar_subpasta(slug, drive, GOOGLE_DRIVE_ROOT_FOLDER)
+        upload_para_drive(mp3_path, mp3_path.name, pasta_id, drive)
+        upload_para_drive(txt_path, txt_path.name, pasta_id, drive)
+    except Exception as e:
+        app.logger.exception("Erro upload TTS:")
+        return jsonify(error="falha upload TTS", detalhe=str(e)), 500
+    return jsonify(audio_url=str(mp3_path.resolve()), slug=slug, folder_id=pasta_id), 200
+
+# Transcription endpoint
+@app.route("/transcrever", methods=["POST"], strict_slashes=False)
+def transcrever():
+    data = request.get_json(force=True) or {}
+    audio_ref = data.get("audio_url") or data.get("audio_file")
+    slug = data.get("slug")
+    if not audio_ref:
+        return jsonify(error="campo 'audio_url' obrigatório"), 400
+    if not slug:
+        slug = Path(audio_ref).stem.replace("_audio", "")
+    try:
+        if os.path.exists(audio_ref):
+            fobj = open(audio_ref, "rb")
+        else:
+            resp = requests.get(audio_ref, timeout=60)
+            resp.raise_for_status()
+            fobj = io.BytesIO(resp.content)
+            fobj.name = Path(audio_ref).name
+    except Exception as e:
+        return jsonify(error="falha carregar áudio", detalhe=str(e)), 400
+    try:
+        raw_srt = client.audio.transcriptions.create(model="whisper-1", file=fobj, response_format="srt")
+        blocks = []
+        for blk in raw_srt.strip().split("\n\n"):
+            parts = blk.split("\n")
+            if len(parts) < 3:
+                continue
+            st, en = parts[1].split(" --> ")
+            txt = " ".join(parts[2:])
+            blocks.append((parse_ts(st), parse_ts(en), txt))
+        srt_path = Path(f"{slug}_legenda.srt")
+        with open(srt_path, "w", encoding="utf-8") as f:
+            f.write(raw_srt)
+        drive = get_drive_service()
+        pasta_id = criar_subpasta(slug, drive, GOOGLE_DRIVE_ROOT_FOLDER)
+        upload_para_drive(srt_path, srt_path.name, pasta_id, drive)
+        return jsonify(transcricao=[{"inicio": i, "fim": f, "texto": t} for i, f, t in blocks], duracao_total=blocks[-1][1] if blocks else 0, slug=slug), 200
+    except Exception as e:
+        app.logger.exception("Erro transcricao:")
+        return jsonify(error="falha transcricao", detalhe=str(e)), 500
+    finally:
+        try: fobj.close()
+        except: pass
+
 # CSV generation endpoint
 @app.route("/gerar_csv", methods=["GET", "POST"], strict_slashes=False)
 def gerar_csv():
     if request.method == "GET":
         return jsonify(status="ready"), 200
-
     data = request.get_json(force=True) or {}
     transcricao = data.get("transcricao")
     texto_original = data.get("texto_original")
     slug = data.get("slug")
     aspect_ratio = data.get("aspect_ratio", "9:16")
     intervalo_segundos = data.get("intervalo_segundos", 3)
-
     if not transcricao:
         return jsonify(error="campo 'transcricao' obrigatório"), 400
-
     if not slug and not texto_original:
         slug = gerar_slug()
     elif not slug:
         slug = slugify(texto_original)
-
     drive = get_drive_service()
     pasta_id = criar_subpasta(slug, drive, GOOGLE_DRIVE_ROOT_FOLDER)
     csv_path = Path(f"{slug}_prompts.csv")
-
-    # 1) gerar CSV file
     try:
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
@@ -130,16 +201,13 @@ def gerar_csv():
                 "Prompt", "Visibility", "Aspect_ratio", "Magic_prompt", "Model",
                 "Seed_number", "Rendering", "Negative_prompt", "Style", "color_palette", "Num_images"
             ])
-
             negative_prompt = (
                 "words, sentences, texts, paragraphs, letters, numbers, syllables, "
                 "low quality, overexposed, underexposed, extra limbs, extra fingers, missing fingers, "
                 "disfigured, deformed, bad anatomy, realistic style, photographic style, 3d, 3d render"
             )
-
             duracao_total = max([blk[1] for blk in transcricao]) if transcricao else 0
             tempos_fixos = list(range(0, math.ceil(duracao_total), intervalo_segundos))
-
             prompts_com_tempo = []
             for inicio, fim, texto in transcricao:
                 tempo = min(tempos_fixos, key=lambda t: abs(t - inicio))
@@ -148,14 +216,12 @@ def gerar_csv():
                     if tempo not in tempos_fixos:
                         tempos_fixos.append(tempo)
                 prompts_com_tempo.append((tempo, texto))
-
             prompts_com_tempo.sort(key=lambda x: x[0])
-
             for tempo, texto in prompts_com_tempo:
                 prompt_completo = (
-                    f"{tempo}, {texto}, Delicate 2d watercolor painting with expressive brush strokes "
-                    "and visible paper texture. Color palette blending soft pastels with bold hues. Artistic composition "
-                    "that evokes emotion and depth, featuring flowing pigments, subtle gradients, and organic imperfections. "
+                    f"{tempo}, {texto}, Delicate 2d watercolor painting with expressive brush strokes ""
+                    "and visible paper texture. Color palette blending soft pastels with bold hues. Artistic composition ""
+                    "that evokes emotion and depth, featuring flowing pigments, subtle gradients, and organic imperfections. ""
                     "Emphasize the handcrafted feel, with layered translucency and a poetic atmosphere."
                 )
                 writer.writerow([
@@ -174,22 +240,12 @@ def gerar_csv():
     except Exception as e:
         app.logger.exception("Erro ao gerar CSV:")
         return jsonify(error="falha ao gerar CSV", detalhe=str(e)), 500
-
-    # 2) upload para Drive
     try:
         upload_para_drive(csv_path, csv_path.name, pasta_id, drive)
     except Exception as e:
         app.logger.exception("Erro no upload para Drive:")
         return jsonify(error="falha no upload para Drive", detalhe=str(e)), 500
-
-    # 3) sucesso
-    return jsonify(
-        slug=slug,
-        folder_url=f"https://drive.google.com/drive/folders/{pasta_id}",
-        intervalo_segundos=intervalo_segundos,
-        num_prompts=len(prompts_com_tempo)
-    ), 200
-
+    return jsonify(slug=slug, folder_url=f"https://drive.google.com/drive/folders/{pasta_id}", intervalo_segundos=intervalo_segundos, num_prompts=len(prompts_com_tempo)), 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
