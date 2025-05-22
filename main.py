@@ -30,21 +30,17 @@ def get_drive_service():
     return build("drive", "v3", credentials=creds)
 
 def criar_subpasta(nome: str, drive, parent_folder_id: str):
-    # Verificar se a pasta já existe
     try:
         results = drive.files().list(
             q=f"name='{nome}' and mimeType='application/vnd.google-apps.folder' and '{parent_folder_id}' in parents",
             spaces='drive',
             fields='files(id, name)'
         ).execute()
-        
         items = results.get('files', [])
         if items:
             return items[0]['id']
-    except Exception:
-        pass  # Se falhar, continua e cria uma nova pasta
-    
-    # Criar nova pasta
+    except:
+        pass
     meta = {
         "name": nome,
         "mimeType": "application/vnd.google-apps.folder",
@@ -82,13 +78,18 @@ def elevenlabs_tts(text: str) -> bytes:
         "voice_id":  "cwIsrQsWEVTols6slKYN"
     }
     for tentativa in range(2):
+        r = requests.post(
+            "https://api.elevenlabs.io/v1/text-to-speech/cwIsrQsWEVTols6slKYN",
+            headers=headers,
+            json=payload,
+            timeout=60
+        )
         try:
-            r = requests.post("https://api.elevenlabs.io/v1/text-to-speech/cwIsrQsWEVTols6slKYN", headers=headers, json=payload, timeout=60)
             r.raise_for_status()
             return r.content
-        except Exception as e:
+        except:
             if tentativa == 1:
-                raise e
+                raise
 
 def parse_ts(ts: str) -> float:
     h, m, rest = ts.split(":")
@@ -106,32 +107,18 @@ def falar():
     mp3_path = Path(f"{slug}_audio.mp3")
     txt_path = Path(f"{slug}_texto.txt")
 
-    # Salvar o texto original em um arquivo TXT
-    try:
-        with open(txt_path, "w", encoding="utf-8") as f:
-            f.write(texto)
-    except Exception as e:
-        return jsonify(error="falha ao salvar arquivo de texto", detalhe=str(e)), 500
+    with open(txt_path, "w", encoding="utf-8") as f:
+        f.write(texto)
 
-    try:
-        audio_bytes = elevenlabs_tts(texto)
-        if not audio_bytes or len(audio_bytes) < 1000:
-            raise Exception("Áudio gerado é vazio ou muito pequeno.")
-        mp3_path.write_bytes(audio_bytes)
-    except Exception as e:
-        return jsonify(error="falha ElevenLabs", detalhe=str(e)), 500
+    audio_bytes = elevenlabs_tts(texto)
+    if not audio_bytes or len(audio_bytes) < 1000:
+        return jsonify(error="Áudio gerado inválido"), 500
+    mp3_path.write_bytes(audio_bytes)
 
-    try:
-        drive = get_drive_service()
-        folder_id = criar_subpasta(slug, drive, GOOGLE_DRIVE_ROOT_FOLDER)
-        
-        # Upload do MP3
-        upload_para_drive(mp3_path, mp3_path.name, folder_id, drive)
-        
-        # Upload do TXT com o texto original
-        upload_para_drive(txt_path, txt_path.name, folder_id, drive)
-    except Exception as e:
-        return jsonify(error="falha no upload para o Drive", detalhe=str(e)), 500
+    drive = get_drive_service()
+    folder_id = criar_subpasta(slug, drive, GOOGLE_DRIVE_ROOT_FOLDER)
+    upload_para_drive(mp3_path, mp3_path.name, folder_id, drive)
+    upload_para_drive(txt_path, txt_path.name, folder_id, drive)
 
     return jsonify(audio_url=str(mp3_path.resolve()), slug=slug, folder_id=folder_id)
 
@@ -140,153 +127,138 @@ def transcrever():
     data = request.get_json(force=True) or {}
     audio_ref = data.get("audio_url") or data.get("audio_file")
     slug = data.get("slug")
-    
     if not audio_ref:
-        return jsonify(error="campo 'audio_url' ou 'audio_file' obrigatório"), 400
-    
+        return jsonify(error="audio_url ou audio_file obrigatório"), 400
+
     if not slug:
-        # Tentar extrair slug do nome do arquivo
-        slug = Path(audio_ref).stem
-        if "_audio" in slug:
-            slug = slug.replace("_audio", "")
+        slug = Path(audio_ref).stem.replace("_audio", "")
+
+    if os.path.exists(audio_ref):
+        fobj = open(audio_ref, "rb")
+    else:
+        resp = requests.get(audio_ref, timeout=60); resp.raise_for_status()
+        fobj = io.BytesIO(resp.content); fobj.name = Path(audio_ref).name
+
+    raw_srt = client.audio.transcriptions.create(
+        model="whisper-1", file=fobj, response_format="srt"
+    )
+    blocks = []
+    for blk in raw_srt.strip().split("\n\n"):
+        parts = blk.split("\n")
+        if len(parts) < 3:
+            continue
+        st_ts, en_ts = parts[1].split(" --> ")
+        txt = " ".join(parts[2:])
+        inicio, fim = parse_ts(st_ts), parse_ts(en_ts)
+        blocks.append({"inicio": inicio, "fim": fim, "texto": txt})
+    total = blocks[-1]["fim"] if blocks else 0
+
+    srt_path = Path(f"{slug}_legenda.srt")
+    with open(srt_path, "w", encoding="utf-8") as f:
+        f.write(raw_srt)
 
     try:
-        if os.path.exists(audio_ref):
-            fobj = open(audio_ref, "rb")
-        else:
-            resp = requests.get(audio_ref, timeout=60)
-            resp.raise_for_status()
-            fobj = io.BytesIO(resp.content)
-            fobj.name = Path(audio_ref).name or "audio.mp3"
-    except Exception as e:
-        return jsonify(error="falha ao carregar áudio", detalhe=str(e)), 400
+        drive = get_drive_service()
+        folder_id = criar_subpasta(slug, drive, GOOGLE_DRIVE_ROOT_FOLDER)
+        upload_para_drive(srt_path, srt_path.name, folder_id, drive)
+    except:
+        pass
 
-    try:
-        raw_srt = client.audio.transcriptions.create(model="whisper-1", file=fobj, response_format="srt")
-        blocks = []
-        for blk in raw_srt.strip().split("\n\n"):
-            parts = blk.split("\n")
-            if len(parts) < 3:
-                continue
-            st, en = parts[1].split(" --> ")
-            txt = " ".join(parts[2:])
-            inicio = parse_ts(st)
-            fim = parse_ts(en)
-            blocks.append((inicio, fim, txt))
-        total = blocks[-1][1] if blocks else 0
-        
-        # Salvar o SRT em um arquivo
-        srt_path = Path(f"{slug}_legenda.srt")
-        with open(srt_path, "w", encoding="utf-8") as f:
-            f.write(raw_srt)
-        
-        # Upload do SRT para o Drive
-        try:
-            drive = get_drive_service()
-            folder_id = criar_subpasta(slug, drive, GOOGLE_DRIVE_ROOT_FOLDER)
-            upload_para_drive(srt_path, srt_path.name, folder_id, drive)
-        except Exception as e:
-            print(f"Erro ao fazer upload do SRT: {e}")
-            # Continua mesmo com erro no upload
-        
-        return jsonify(transcricao=[{"inicio": i, "fim": f, "texto": t} for i, f, t in blocks], duracao_total=total, slug=slug)
-    except Exception as e:
-        return jsonify(error="falha na transcrição", detalhe=str(e)), 500
-    finally:
-        try: fobj.close()
-        except: pass
+    fobj.close()
+    return jsonify(transcricao=blocks, duracao_total=total, slug=slug)
 
 @app.route("/gerar_csv", methods=["POST"])
 def gerar_csv():
     data = request.get_json(force=True) or {}
-    transcricao = data.get("transcricao")
-    prompts = data.get("prompts")
-    texto_original = data.get("texto_original")
-    slug = data.get("slug")
-    aspect_ratio = data.get("aspect_ratio", "9:16")  # Padrão 9:16 se não especificado
-    intervalo_segundos = data.get("intervalo_segundos", 4)  # Intervalo fixo entre prompts, padrão 4 segundos
+    transcricao         = data.get("transcricao")
+    prompts             = data.get("prompts")
+    slug                = data.get("slug")
+    aspect_ratio        = data.get("aspect_ratio", "9:16")
+    intervalo_segundos  = data.get("intervalo_segundos", 4)
 
     if not transcricao or not prompts:
         return jsonify(error="transcricao e prompts são obrigatórios"), 400
-    
-    # Se não tiver slug nem texto_original, gera um slug aleatório
-    if not slug and not texto_original:
+    if len(prompts) != len(transcricao):
+        return jsonify(
+            error="número de prompts deve ser igual ao número de blocos de transcrição"
+        ), 400
+
+    if not slug:
         slug = gerar_slug()
-    elif not slug:
-        slug = slugify(texto_original)
 
     try:
-        drive = get_drive_service()
+        drive    = get_drive_service()
         pasta_id = criar_subpasta(slug, drive, GOOGLE_DRIVE_ROOT_FOLDER)
 
-        # CSV no formato exato do modelo
+        duracao_total = max(b["fim"] for b in transcricao)
+
+        # Arredonda cada início para baixo ao múltiplo de intervalo
+        init_times = [
+            math.floor(b["inicio"] / intervalo_segundos) * intervalo_segundos
+            for b in transcricao
+        ]
+
+        # Garante sequência crescente e dentro do total
+        ordered_times = []
+        prev_time = -intervalo_segundos
+        for t in init_times:
+            t_ok = max(t, prev_time + intervalo_segundos)
+            max_allowed = max(duracao_total - intervalo_segundos, 0)
+            t_ok = min(t_ok, max_allowed)
+            ordered_times.append(t_ok)
+            prev_time = t_ok
+
+        # Zipa e ordena por tempo
+        prompts_com_tempo = sorted(
+            zip(ordered_times, prompts, transcricao),
+            key=lambda x: x[0]
+        )
+
         csv_path = Path(f"{slug}_prompts.csv")
+        negative_prompt = (
+            "words, sentences, texts, paragraphs, letters, numbers, syllables, "
+            "low quality, overexposed, underexposed, extra limbs, extra fingers, "
+            "missing fingers, disfigured, deformed, bad anatomy, realistic style, "
+            "photographic style, 3d, 3d render"
+        )
+
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            # Cabeçalho exato conforme o modelo
             writer.writerow([
-                "Prompt", "Visibility", "Aspect_ratio", "Magic_prompt", "Model", 
-                "Seed_number", "Rendering", "Negative_prompt", "Style", "color_palette", "Num_images"
+                "Prompt", "Visibility", "Aspect_ratio", "Magic_prompt", "Model",
+                "Seed_number", "Rendering", "Negative_prompt", "Style",
+                "color_palette", "Num_images"
             ])
-            
-            # Valores padrão para as colunas fixas
-            negative_prompt = "words, sentences, texts, paragraphs, letters, numbers, syllables, low quality, overexposed, underexposed, extra limbs, extra fingers, missing fingers, disfigured, deformed, bad anatomy, realistic style, photographic style, 3d, 3d render"
-            
-            # Calcular a duração total do áudio
-            duracao_total = max([bloco["fim"] for bloco in transcricao]) if transcricao else 0
-            
-            # Gerar tempos em intervalos fixos de 4 segundos
-            tempos_fixos = list(range(0, math.ceil(duracao_total), intervalo_segundos))
-            
-            # Associar cada prompt ao tempo fixo mais próximo
-            prompts_com_tempo = []
-            for i, (prompt_texto, bloco) in enumerate(zip(prompts, transcricao)):
-                # Encontrar o tempo fixo mais próximo do início do bloco
-                tempo_mais_proximo = min(tempos_fixos, key=lambda t: abs(t - bloco["inicio"]))
-                
-                # Se este tempo já foi usado, usar o próximo tempo sequencial
-                while tempo_mais_proximo in [p[0] for p in prompts_com_tempo]:
-                    tempo_mais_proximo += intervalo_segundos
-                    if tempo_mais_proximo not in tempos_fixos:
-                        tempos_fixos.append(tempo_mais_proximo)
-                
-                prompts_com_tempo.append((tempo_mais_proximo, prompt_texto, bloco))
-            
-            # Ordenar por tempo
-            prompts_com_tempo.sort(key=lambda x: x[0])
-            
-            # Escrever no CSV
+
             for tempo, prompt_texto, bloco in prompts_com_tempo:
-                # Formatar o tempo de início como inteiro
-                tempo_inicio = f"{tempo}"
-                
-                # Construir o prompt completo: tempo + prompt + informações de aquarela
-                prompt_completo = f"{tempo_inicio}, {prompt_texto}, Delicate 2d watercolor painting with expressive brush strokes and visible paper texture. Color palette blending soft pastels with bold hues. Artistic composition that evokes emotion and depth, featuring flowing pigments, subtle gradients, and organic imperfections. Emphasize the handcrafted feel, with layered translucency and a poetic atmosphere."
-                
-                # Escrever a linha com todos os valores conforme o modelo
+                prompt_completo = (
+                    f"{int(tempo)}, {prompt_texto}, "
+                    "Delicate 2D watercolor painting with expressive brushstrokes"
+                    "and visible paper texture. Grain effect. Color palette that mixes soft pastel tones with darker, more depressive hues. Artistic composition that evokes "
+                    "emotion and depth, with fluid pigments, subtle gradients and organic imperfections. Emphasizes the artisanal touch, with layered translucency and a poetic, nihilistic atmosphere."
+                )
                 writer.writerow([
-                    prompt_completo,  # Prompt completo com tempo, texto e aquarela
-                    "private",        # Visibility
-                    aspect_ratio,     # Aspect_ratio (9:16 por padrão)
-                    "on",             # Magic_prompt
-                    "3",              # Model
-                    "",               # Seed_number (vazio)
-                    "turbo",        # Rendering
-                    negative_prompt,  # Negative_prompt
-                    "design",           # Style
-                    "",               # color_palette (vazio)
-                    "4"               # Num_images
+                    prompt_completo,
+                    "private",
+                    aspect_ratio,
+                    "on",
+                    "3",
+                    "",
+                    "turbo",
+                    negative_prompt,
+                    "design",
+                    "",
+                    "4"
                 ])
 
-        # Upload
         upload_para_drive(csv_path, csv_path.name, pasta_id, drive)
-
         return jsonify(
-            slug=slug, 
+            slug=slug,
             folder_url=f"https://drive.google.com/drive/folders/{pasta_id}",
             intervalo_segundos=intervalo_segundos,
             num_prompts=len(prompts_com_tempo)
         )
+
     except Exception as e:
         return jsonify(error="falha ao gerar CSV ou fazer upload", detalhe=str(e)), 500
 
