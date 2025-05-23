@@ -122,11 +122,20 @@ def falar():
 
     return jsonify(audio_url=str(mp3_path.resolve()), slug=slug, folder_id=folder_id)
 
+# ... [IMPORTS E CONFIGURAÇÕES INALTERADOS ACIMA] ...
+
 @app.route("/transcrever", methods=["POST"])
 def transcrever():
     data = request.get_json(force=True) or {}
     audio_ref = data.get("audio_url") or data.get("audio_file")
     slug = data.get("slug")
+
+    if not audio_ref and slug:
+        # fallback: tenta achar o arquivo local
+        fallback_path = Path(f"{slug}_audio.mp3")
+        if fallback_path.exists():
+            audio_ref = str(fallback_path)
+
     if not audio_ref:
         return jsonify(error="audio_url ou audio_file obrigatório"), 400
 
@@ -136,8 +145,10 @@ def transcrever():
     if os.path.exists(audio_ref):
         fobj = open(audio_ref, "rb")
     else:
-        resp = requests.get(audio_ref, timeout=60); resp.raise_for_status()
-        fobj = io.BytesIO(resp.content); fobj.name = Path(audio_ref).name
+        resp = requests.get(audio_ref, timeout=60)
+        resp.raise_for_status()
+        fobj = io.BytesIO(resp.content)
+        fobj.name = Path(audio_ref).name
 
     raw_srt = client.audio.transcriptions.create(
         model="whisper-1", file=fobj, response_format="srt"
@@ -178,10 +189,14 @@ def gerar_csv():
 
     if not transcricao or not prompts:
         return jsonify(error="transcricao e prompts são obrigatórios"), 400
+
+    # Correção automática com aviso
     if len(prompts) != len(transcricao):
-        return jsonify(
-            error="número de prompts deve ser igual ao número de blocos de transcrição"
-        ), 400
+        print(f"[WARN] Quantidade de prompts ({len(prompts)}) diferente da transcrição ({len(transcricao)})")
+        if len(prompts) < len(transcricao):
+            prompts += [""] * (len(transcricao) - len(prompts))
+        else:
+            prompts = prompts[:len(transcricao)]
 
     if not slug:
         slug = gerar_slug()
@@ -192,13 +207,11 @@ def gerar_csv():
 
         duracao_total = max(b["fim"] for b in transcricao)
 
-        # Arredonda cada início para baixo ao múltiplo de intervalo
         init_times = [
             math.floor(b["inicio"] / intervalo_segundos) * intervalo_segundos
             for b in transcricao
         ]
 
-        # Garante sequência crescente e dentro do total
         ordered_times = []
         prev_time = -intervalo_segundos
         for t in init_times:
@@ -208,7 +221,6 @@ def gerar_csv():
             ordered_times.append(t_ok)
             prev_time = t_ok
 
-        # Zipa e ordena por tempo
         prompts_com_tempo = sorted(
             zip(ordered_times, prompts, transcricao),
             key=lambda x: x[0]
