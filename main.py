@@ -96,12 +96,9 @@ def parse_ts(ts: str) -> float:
     s, ms = rest.split(",")
     return int(h)*3600 + int(m)*60 + int(s) + int(ms)/1000
 
-# ---------- ROTA DE HEALTH-CHECK ----------
 @app.route("/", methods=["GET", "HEAD"])
 def index():
-    """Retorna 200 para indicar que o serviço está online."""
     return jsonify(status="online", message="API do gerador de CSV ativa"), 200
-# -----------------------------------------
 
 @app.route("/falar", methods=["POST"])
 def falar():
@@ -129,8 +126,6 @@ def falar():
 
     return jsonify(audio_url=str(mp3_path.resolve()), slug=slug, folder_id=folder_id)
 
-# ... [IMPORTS E CONFIGURAÇÕES INALTERADOS ACIMA] ...
-
 @app.route("/transcrever", methods=["POST"])
 def transcrever():
     data = request.get_json(force=True) or {}
@@ -138,7 +133,6 @@ def transcrever():
     slug = data.get("slug")
 
     if not audio_ref and slug:
-        # fallback: tenta achar o arquivo local
         fallback_path = Path(f"{slug}_audio.mp3")
         if fallback_path.exists():
             audio_ref = str(fallback_path)
@@ -152,8 +146,6 @@ def transcrever():
     if os.path.exists(audio_ref):
         fobj = open(audio_ref, "rb")
     else:
-        resp = requests.get(audio_ref, timeout=60); resp.raise_for_status()
-        fobj = io.BytesIO(resp.content); fobj.name = Path(audio_ref).name
         resp = requests.get(audio_ref, timeout=60)
         resp.raise_for_status()
         fobj = io.BytesIO(resp.content)
@@ -199,9 +191,7 @@ def gerar_csv():
     if not transcricao or not prompts:
         return jsonify(error="transcricao e prompts são obrigatórios"), 400
 
-    # Correção automática com aviso
     if len(prompts) != len(transcricao):
-        # <-- AGORA O AVISO APARECE ANTES DO RETURN -->
         print(f"[WARN] Quantidade de prompts ({len(prompts)}) diferente da transcrição ({len(transcricao)})")
         return jsonify(
             error="número de prompts deve ser igual ao número de blocos de transcrição"
@@ -216,13 +206,11 @@ def gerar_csv():
 
         duracao_total = max(b["fim"] for b in transcricao)
 
-        # Arredonda cada início para baixo ao múltiplo de intervalo
         init_times = [
             math.floor(b["inicio"] / intervalo_segundos) * intervalo_segundos
             for b in transcricao
         ]
 
-        # Garante sequência crescente e dentro do total
         ordered_times = []
         prev_time = -intervalo_segundos
         for t in init_times:
@@ -232,7 +220,6 @@ def gerar_csv():
             ordered_times.append(t_ok)
             prev_time = t_ok
 
-        # Zipa e ordena por tempo
         prompts_com_tempo = sorted(
             zip(ordered_times, prompts, transcricao),
             key=lambda x: x[0]
