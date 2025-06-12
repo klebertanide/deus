@@ -1,12 +1,18 @@
-services:
-  - type: web
-    name: deus-te-enviou-isso
-    env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
+    services:
+  - type: cron
+    name: deusinstagram-06h
+    repo: https://github.com/klebertanide/deus
+    schedule: '0 6 * * *' # Executa às 06:00 UTC
     envVars:
       - key: OPENAI_API_KEY
-        sync: false
-      - key: ELEVENLABS_API_KEY
-        sync: false
-    autoDeploy: true
+        value: valor
+    startCommand: python main.py
+
+  - type: cron
+    name: deusinstagram-18h
+    repo: https://github.com/klebertanide/deus
+    schedule: '0 18 * * *' # Executa às 18:00 UTC
+    envVars:
+      - key: OPENAI_API_KEY
+        value: valor
+    startCommand: python main.py
